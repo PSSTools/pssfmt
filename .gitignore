@@ -216,3 +216,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+
+# ivpm workspace: fetched and built dependencies, plus the venv it manages.
+# Reproduced by `ivpm update`, never edited by hand.
+/packages/
+
+.agents/
+.claude/
+.codex/
+.cursor/
+

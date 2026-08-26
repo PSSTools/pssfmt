@@ -1,0 +1,110 @@
+# X-3 -- continuous integration.
+#
+# Today every job runs without pssparser, because everything that exists today
+# runs without pssparser: the layout engine takes no dependencies by design
+# (formatter.md section 10.3) and the boundary test proves it still does.
+#
+# The gates that PLAN.md marks **required** -- the corpus round-trip (T-5) and
+# the mutation-invariance fuzz (T-8) -- are not here yet because they need the
+# upstream token API (Phase U). They are listed as TODO rather than omitted so
+# that a green build is not mistaken for a complete one.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+      - name: Fetch the corpus
+        # Not the T-5 gate -- that needs pssparser, which no job here installs,
+        # so the sweeps themselves still skip (T-2). What this buys is that the
+        # *presence* guard runs for real: since C-8 the suite fails rather than
+        # skips when the corpus is absent, so without this step `pytest -m "not
+        # slow"` goes red at test_the_corpus_is_present in every matrix leg.
+        #
+        # Failing loudly on a clone error, with the reason named, is the point.
+        # The URL is the GitHub mirror, matching ivpm.yaml (per-repo consistency
+        # -- pss-corpus PLAN.md C-2); if the mirror has not landed yet (C-2a)
+        # this is the step that should say so, rather than leaving a collection
+        # error two steps later to be misread as a test bug.
+        run: |
+          set -eu
+          if ! git clone https://github.com/psstools/pss-corpus.git packages/pss-corpus; then
+            echo "::error::could not clone the corpus. If this is 'repository not \
+          found', the GitHub mirror of git.dvkit.org/psstools/pss-corpus has not \
+          been set up yet -- that is pss-corpus PLAN.md item C-2a, not a fault in \
+          this workflow."
+            exit 1
+          fi
+          n=$(find packages/pss-corpus/curated -name '*.pss' | wc -l)
+          echo "corpus: $n .pss files"
+          test "$n" -ge 50
+
+      - name: Unit and layout tests
+        run: pytest -m "not slow" -q
+
+  boundaries:
+    name: architectural boundaries (T-9, T-13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+      # Separate job on purpose: this is the check that must not be quietly
+      # relaxed, and a dedicated job makes a change to it visible in review.
+      - run: pytest tests/test_boundaries.py -q
+
+  docs:
+    name: docs (T-10, D-16)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs,test]"
+      - name: Build with warnings as errors
+        run: python -m sphinx -b html docs docs/_build/html -W --keep-going
+
+  # TODO (T-5): corpus round-trip gate -- 465 cases over 92 files, written and
+  #   green locally. Must be a *required* check once it exists here; it is the
+  #   proof of safety.
+  #
+  #   Two of its three prerequisites are now met. The corpus is a declared ivpm
+  #   dependency (pss-corpus), and it fails rather than skips when absent, so a
+  #   job that fetches it cannot silently sweep nothing. What is missing is
+  #   pssparser: no job here installs it, so `importorskip` would skip the
+  #   whole suite, which is exactly the quiet green this gate exists to
+  #   prevent. It needs a *released* pssparser carrying U-1..U-4 -- PLAN.md
+  #   Q-9, not Q-3. Do not add the job before then: a job that skips is worse
+  #   than a job that is absent, because it appears in the checks list.
+  # TODO (P5-2, T-8): whitespace-mutation invariance over the corpus.
+  # TODO (X-5): pssfmt --check over this repo's own tracked .pss files.

@@ -1,0 +1,63 @@
+[build-system]
+# 77, not 68: `license = "Apache-2.0"` is a PEP 639 license expression only
+# from setuptools 77. Older versions accept the same line as free text and emit
+# `License:` instead of `License-Expression:`, so the floor is what makes a
+# rebuild from the sdist produce the same metadata as the released wheel.
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pssfmt"
+description = "A formatter for the Accellera Portable Test and Stimulus Standard (PSS)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [
+    { name = "Matthew Ballance", email = "matt.ballance@gmail.com" },
+]
+keywords = ["pss", "accellera", "formatter", "verification", "eda"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Text Processing :: Filters",
+]
+# Deliberately empty. pssfmt needs pssparser's tokenizer at runtime, but the
+# token/CST API it needs does not exist yet (PLAN.md Phase U, Q-2), and
+# pssparser is not on PyPI. Declaring a dependency that cannot be resolved
+# would break `pip install pssfmt` for no benefit. Add `pssparser` here when
+# U-3 lands and a release exists. Until then pssfmt is installed alongside
+# pssparser by ivpm.
+#
+# Everything under src/pssfmt/layout/ works with no dependency at all, by
+# design (formatter.md section 10.3, enforced by T-9).
+dependencies = []
+dynamic = ["version"]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+docs = ["sphinx>=7.0", "myst-parser", "furo"]
+
+# The console script lands with the CLI (PLAN.md P4-1):
+#
+#   [project.scripts]
+#   pssfmt = "pssfmt.cli:main"
+#
+# Declared now it would install a `pssfmt` command that raises ImportError on
+# every invocation, which is a worse answer than the command not existing.
+
+[project.urls]
+# No Source URL: git.dvkit.org serves git clones, not browsable pages, and a
+# released version's metadata can never be edited -- a dead link would be
+# permanent. Add one when there is a public mirror. (Same call as pygments-pss.)
+Homepage = "https://accellera.org/downloads/standards/portable-stimulus"
+
+[tool.setuptools.dynamic]
+version = { attr = "pssfmt.__version__._pkg_version" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pssfmt = ["py.typed"]

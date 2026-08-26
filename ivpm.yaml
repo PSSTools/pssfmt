@@ -1,0 +1,64 @@
+package:
+  name: pssfmt
+
+  # A bare `ivpm update` must resolve the *development* set. `default` carries
+  # only what a released wheel needs; everything that makes the repo testable
+  # and documentable lives in `default-dev`. Without this key a fresh checkout
+  # -- CI, or a new contributor -- resolves `default`, gets no pytest, and the
+  # first command anyone runs fails for a reason unrelated to their change.
+  #
+  # A working copy hides the omission: once `ivpm update -d default-dev` has
+  # run, `packages/ivpm.json` remembers the choice and every later bare
+  # `ivpm update` keeps using it. (Same reasoning, same comment, as
+  # pygments-pss/ivpm.yaml.)
+  default-dep-set: default-dev
+
+  dep-sets:
+  # Runtime. Unlike pygments-pss -- which reads only PSSLexer.g4 and can take
+  # pssparser as `type: raw` -- pssfmt calls the tokenizer on every format, so
+  # pssparser is a normal built dependency here and every install carries the
+  # C++/Cython/ANTLR build (formatter.md section 10.2).
+  #
+  # PLAN.md Q-7 revisits this: if that build cost is unacceptable for a library
+  # dependency, the alternative is to accept that pssfmt is a dev tool and move
+  # pssparser to `default-dev` only. Do not change this line without closing Q-7.
+  - name: default
+    deps:
+    - name: pssparser
+      url: https://github.com/psstools/pssparser.git
+
+  - name: default-dev
+    deps:
+    - name: pssparser
+      url: https://github.com/psstools/pssparser.git
+    - name: pytest
+      src: pypi
+    # Documentation build. docs/ is a real regression signal, not a courtesy:
+    # T-10 builds it with -W and D-17 formats every PSS block in it.
+    - name: sphinx
+      src: pypi
+    - name: myst-parser
+      src: pypi
+    - name: furo
+      src: pypi
+    # PSS syntax highlighting for docs code blocks.
+    - name: sphinx-pss
+      url: https://github.com/psstools/sphinx-pss.git
+    # The lexer sphinx-pss wraps. Also the corpus's donor repo, which is why it
+    # is checked out here: pss-corpus PLAN.md Phase C3 migrates it off its own
+    # vendored copy.
+    - name: pygments-pss
+      url: https://github.com/psstools/pygments-pss.git
+
+    # The shared .pss corpus (pss-corpus/PLAN.md). Test data: `type: raw`
+    # because there is nothing to build and nothing to install -- ivpm would
+    # work without it, but it would not *say* anything without it.
+    #
+    # URL names the GitHub mirror rather than the git.dvkit.org upstream, so a
+    # CI runner with no access to the self-hosted instance can fetch it. That
+    # matches this repo's other two deps; pygments-pss names the upstream in
+    # its own file, and per-repo consistency is the convention (pss-corpus
+    # PLAN.md C-2).
+    - name: pss-corpus
+      url: https://github.com/psstools/pss-corpus.git
+      type: raw
