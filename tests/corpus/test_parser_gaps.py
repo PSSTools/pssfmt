@@ -16,6 +16,9 @@ cannot lay out a construct the tree does not contain.
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("pssparser")
@@ -78,3 +81,109 @@ def test_the_nearest_accepted_spellings_still_work():
         .num_syntax_errors == 0
     assert cst.parse('component c { string s = "a: \\n"; }') \
         .num_syntax_errors == 0
+
+
+# ---------------------------------------------------------------------------
+# C-20 -- the same names on both sides of the boundary
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: pssparser's corpus sweep (pss-corpus PLAN.md C-18), which records the same
+#: defects from the other side: it sweeps whole corpus *files*, this module
+#: reproduces each cause in one line of PSS.
+_SWEEP = (_REPO_ROOT / "packages" / "pssparser" / "tests" / "python"
+          / "corpus" / "test_pss_corpus.py")
+
+
+def _literals(path, *names):
+    """Read module-level literal assignments without importing the module.
+
+    Read rather than imported on purpose. Importing would run pssparser's
+    corpus discovery, insert on ``sys.path`` and bind that module's idea of
+    where the corpus lives into this process -- for what is a comparison of two
+    tables of strings. Parsing sidesteps all of it, and works whether or not
+    the file's own dependencies are satisfied here.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id in names:
+                out[target.id] = ast.literal_eval(node.value)
+    missing = set(names) - set(out)
+    assert not missing, "%s no longer defines %s" % (path.name, sorted(missing))
+    return out
+
+
+def _sweep_tables():
+    if not _SWEEP.is_file():
+        # Legitimately absent: pssfmt can be developed against an installed
+        # pssparser wheel, which carries no tests. The check this skips is a
+        # duplicate -- pssparser's own suite pins its tables internally
+        # (test_the_recorded_defects_use_the_declared_identifiers). What is
+        # lost here is only the cross-repo half.
+        pytest.skip("pssparser's corpus sweep is not in this checkout: %s"
+                    % _SWEEP)
+    return _literals(_SWEEP, "RECORDED_DEFECTS", "KNOWN_UNPARSEABLE")
+
+
+def _ids(reasons):
+    return {r.split(":", 1)[0].strip() for r in reasons}
+
+
+def test_every_gap_reproduced_here_is_one_pssparser_records():
+    # The direction that catches a stale reproducer: a gap fixed upstream and
+    # struck from pssparser's table, while this file still carries a case for
+    # it under a name that no longer means anything.
+    tables = _sweep_tables()
+    ours = _ids(GAPS)
+    theirs = set(tables["RECORDED_DEFECTS"])
+    assert ours <= theirs, (
+        "this file reproduces gaps pssparser does not record: %s. Either the "
+        "identifier is stale here, or pssparser's RECORDED_DEFECTS lost an "
+        "entry it still needs." % sorted(ours - theirs))
+
+
+def test_every_u8_pssparser_records_is_reproduced_here():
+    # The other direction, and the one with teeth. A gap only pssparser knows
+    # about has no minimal case anywhere, so whoever fixes it has nothing to
+    # work against but a 200-line corpus file.
+    #
+    # Restricted to U-8: those are valid PSS the grammar rejects, which is what
+    # this module is for. U-9 is the inverse -- input the front end wrongly
+    # *accepts* -- and a reproducer for it belongs with the CLI's exit-status
+    # behaviour, not here among constructs pssfmt must round-trip.
+    tables = _sweep_tables()
+    theirs = {d for d in tables["RECORDED_DEFECTS"] if d.startswith("U-8")}
+    ours = _ids(GAPS)
+    assert theirs <= ours, (
+        "pssparser records U-8 gaps with no minimal reproducer here: %s"
+        % sorted(theirs - ours))
+
+
+def test_the_two_repos_agree_on_which_corpus_files_fail():
+    # The strongest of the three: not just the vocabulary but the findings.
+    # Both repos sweep the same 92 files with the same parser, so their
+    # file-to-cause tables must be equal -- if they diverge, one of them is
+    # describing a parser that is not the one being run.
+    tables = _sweep_tables()
+    # Read from source, like the other side, rather than imported: importing
+    # test_round_trip depends on pytest having put this directory on sys.path,
+    # which is a property of how the suite was invoked and not of the tables.
+    ours = _literals(
+        Path(__file__).with_name("test_round_trip.py"),
+        "KNOWN_UNPARSEABLE")["KNOWN_UNPARSEABLE"]
+
+    theirs = tables["KNOWN_UNPARSEABLE"]
+    assert set(ours) == set(theirs), (
+        "the repos disagree on which corpus files fail to parse.\n"
+        "  only pssfmt:    %s\n  only pssparser: %s"
+        % (sorted(set(ours) - set(theirs)), sorted(set(theirs) - set(ours))))
+    differing = sorted(k for k in ours if ours[k] != theirs[k])
+    assert not differing, (
+        "same files, different recorded causes: %s. The cause strings are "
+        "shared verbatim so that one fix flips both repos' markers together."
+        % differing)

@@ -157,7 +157,16 @@ def broken_buckets() -> tuple:
     """
     if CORPUS_REPO is None:
         return FALLBACK_BROKEN_BUCKETS
-    import tomllib
+    # `tomllib` is stdlib only from 3.11, and this project supports 3.9. The
+    # gap was invisible until the corpus started being fetched in CI (C-9a):
+    # with no corpus, CORPUS_REPO is None and this line is never reached, so
+    # the 3.9 and 3.10 legs passed by not getting here. That is the same shape
+    # as the skip C-8 removed -- a check that holds only while its input is
+    # missing -- one level down.
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        import tomli as tomllib
     data = tomllib.loads(
         (CORPUS_REPO / "manifest.toml").read_text(encoding="utf-8"))
     return tuple(sorted(

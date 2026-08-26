@@ -36,7 +36,11 @@ dependencies = []
 dynamic = ["version"]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+# `tomli` reads the corpus's manifest.toml (pss-corpus PLAN.md C-9) on the two
+# interpreters where `tomllib` is not stdlib. Not a runtime dependency: nothing
+# under src/ reads TOML, and the layout engine's zero-dependency promise (T-9)
+# is unaffected by what the test extra pulls in.
+test = ["pytest>=8.0", "tomli>=1.1.0; python_version < '3.11'"]
 docs = ["sphinx>=7.0", "myst-parser", "furo"]
 
 # The console script lands with the CLI (PLAN.md P4-1):
