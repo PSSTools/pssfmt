@@ -5,14 +5,15 @@ A formatter for the Accellera Portable Test and Stimulus Standard.
 
 .. warning::
 
-   **Pre-alpha.** ``pssfmt`` cannot format a file yet: it has no style rules.
-   What it *does* have is everything underneath them -- a layout engine, the
-   comment-attachment model, and a verifier with a fail-safe -- plus the proof
-   that the pipeline never loses a byte. The null formatter reproduces every
-   file in the test corpus exactly, which is the point at which style
-   decisions become the only thing left and the only thing reversible.
+   **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
+   declarations and their bodies; every other construct is reproduced exactly
+   until its rule is written. That is by design rather than by accident: a
+   construct with no rule falls back to the formatter that changes nothing, so
+   an incomplete rule set cannot corrupt anything, and adding a rule cannot
+   make an unrelated construct worse.
 
-   Follow :doc:`design/plan` for what is done and what is next.
+   :doc:`status` says what is built, what is not, and in what order the
+   rest lands.
 
 Three audiences, three toctrees, and keeping them apart is deliberate:
 conflating the person who runs ``pssfmt`` with the person who writes a rule
@@ -23,6 +24,8 @@ for it is the usual way a formatter's documentation becomes useless to both.
    :caption: Using pssfmt
 
    quickstart
+   style
+   status
 
 .. toctree::
    :maxdepth: 2
@@ -37,19 +40,13 @@ for it is the usual way a formatter's documentation becomes useless to both.
 
    reference_api
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Design history
-
-   design/formatter
-   design/plan
 
 What ``pssfmt`` promises
 ------------------------
 
 The safety contract is the reason a team is willing to put a formatter in a
 pre-commit hook, and most formatters never write it down. Stated early, and
-in full, once the verifier lands (``D-8``):
+in full:
 
 * **It does not change your code.** Output re-lexes to the same token
   sequence as the input -- same types, same text -- and comment text is
@@ -59,8 +56,10 @@ in full, once the verifier lands (``D-8``):
   emits that file *unchanged* along with a diagnostic. A formatter that is
   occasionally a no-op is survivable; one that occasionally corrupts is not.
 
-Not yet enforced, because the pipeline that would enforce it is not built.
-:doc:`design/plan` tracks it as ``P1-3``.
+The first two are enforced today by the verifier, over the whole test
+corpus. The third -- emitting the file unchanged rather than emitting
+something wrong -- is what makes the other two safe to rely on. See
+:doc:`status`.
 
 Indices
 -------

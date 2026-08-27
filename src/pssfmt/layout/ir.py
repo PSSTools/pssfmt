@@ -1,11 +1,12 @@
-"""Layout IR -- the algebraic document a rule builds (``P2-1``).
+"""Layout IR -- the algebraic document a rule builds.
 
 Terminology
 -----------
-This is called the **Layout IR**, not "Doc". ``formatter.md`` section 1.1(b)
-is explicit about why: ``sphinx-pss`` exists in this project and "Doc" is
-actively misleading here. Prettier's literature calls the equivalent structure
-a Doc; when reading that literature, read "Doc" for "Layout".
+This is called the **Layout IR**, not "Doc". Prettier's literature -- and
+most writing about Wadler-style pretty printing -- calls the equivalent
+structure a "Doc", but this project has ``sphinx-pss`` and a ``docs/`` tree,
+so "Doc" is actively misleading here. When reading that literature, read
+"Doc" for "Layout".
 
 The node set
 ------------
@@ -43,9 +44,11 @@ makes sharing cheap rather than merely legal.
 
 Invariant
 ---------
-Nothing in this package imports ``pssfmt.*`` or ``pssparser.*``
-(``formatter.md`` section 10.3). ``T-9`` enforces it mechanically, because
-section 10.3 says a convention is not sufficient.
+Nothing in this package imports ``pssfmt.*`` or ``pssparser.*``. The layout
+engine is a general-purpose pretty printer that happens to live here; keeping
+it free of PSS lets it be tested against hand-written trees alone, and lets it
+be extracted if anything else ever wants it. A test enforces this
+mechanically, because a convention that is only written down is not enough.
 """
 
 from __future__ import annotations
@@ -140,8 +143,9 @@ class Indent(_Node):
     """Increase indentation by ``width`` columns for ``contents``.
 
     ``width`` is a column count supplied by the caller -- in practice by the
-    resolved ``Style`` policy, per construct (``P3-0``). A rule module passing
-    an integer literal here is a bug that ``T-13`` fails on.
+    resolved style policy, per construct. A rule module passing an integer
+    literal here is a bug, and a test fails on it: indentation width is
+    configurable, so a rule that hardcodes it silently ignores the user.
     """
 
     contents: "Layout"
@@ -197,9 +201,8 @@ class Fill(_Node):
     the *next* content and broken only if that pair does not fit -- so a long
     list wraps rather than exploding one item per line.
 
-    ``formatter.md`` section 3.2 notes this matters more in PSS than in most
-    languages: constraint range lists (``x in [0..7, 16, 32..63]``) and enum
-    bodies are exactly this shape.
+    This matters more in PSS than in most languages: constraint range lists
+    (``x in [0..7, 16, 32..63]``) and enum bodies are exactly this shape.
     """
 
     parts: Tuple["Layout", ...]

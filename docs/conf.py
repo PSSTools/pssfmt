@@ -1,13 +1,24 @@
-"""Sphinx configuration (``D-1``).
+"""Sphinx configuration.
 
-Follows ``pygments-pss`` rather than ``pssparser``: ``sphinx`` + ``myst-parser``
-+ ``furo``. Two reasons, both practical.
+Follows ``pygments-pss`` rather than ``pssparser``: ``sphinx`` + ``furo``,
+because ``pssfmt`` is pure Python, so autodoc needs a plain ``sys.path`` entry
+and none of the compiled-extension handling that ``pssparser/docs/conf.py``
+documents at length.
 
-* MyST means ``formatter.md`` and its successors render as-is under
-  ``docs/design/``, with no conversion step to drift out of date (``D-15``).
-* ``pssfmt`` is pure Python, so autodoc needs a plain ``sys.path`` entry and
-  none of the compiled-extension handling that ``pssparser/docs/conf.py``
-  documents at length.
+**Nothing in ``docs/`` renders the repository's working notes, and that is
+deliberate.** This tree used to carry ``docs/design/``, two stubs that
+``{include}``-ed the root ``PLAN.md`` and ``formatter.md`` so a living design
+document would not need a second copy. The reasoning was sound and the result
+was not: those files are drafting documents -- continuously revised, written
+to think in rather than to be read -- and publishing them presented working
+notes as documentation. They were also untracked, so the tracked stubs
+included files that did not exist in a fresh clone, and ``-W`` turned every
+resulting warning into a failed build. A docs job that only passes on the
+author's machine is worse than no docs job.
+
+Anything from those notes that a reader needs is written into a real page
+instead. ``myst_parser`` stays enabled although no Markdown is rendered today;
+it costs nothing and the next ``.md`` page should not need a config change.
 
 ``sphinx_pss`` gives PSS code blocks real highlighting. It is a dev
 dependency, so the build degrades to unhighlighted literal blocks rather than

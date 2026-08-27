@@ -1,7 +1,7 @@
-"""Post-layout column alignment (``P2-4``) and the four alignment modes (``P2-6``).
+"""Post-layout column alignment, and the four alignment modes.
 
 This pass runs **after** line breaking, never before, so alignment can never
-influence a fit decision (``formatter.md`` section 3.3). Line breaking decides
+influence a fit decision. Line breaking decides
 where lines end; this decides how the columns inside a run of finished lines
 line up. Doing it in the other order makes the two mutually recursive.
 
@@ -21,8 +21,13 @@ is what the rule brought along.
 
 The four modes
 --------------
-Taken from verible, which is the closest peer formatter and defaults to
-``infer`` (``PLAN.md`` section 6.4):
+Taken from verible, the closest peer formatter, which also defaults to
+``infer``. That default is not just precedent: measured over the PSS test
+corpus, hand-written code aligns its trailing comments in every run of three
+or more lines, and machine-generated code aligns none of them. A global
+``align`` would column-ise generated output nobody asked to be aligned; a
+global ``flush-left`` would destroy hand-built register tables. ``infer``
+reproduces both. See the style guide for the measurements.
 
 ``align``
     Pad each column to the widest cell in its group.
@@ -312,10 +317,9 @@ def _was_aligned(parsed: Sequence[_Line], members: Sequence[int]) -> bool:
        This reads the columns as they stand *after* line breaking, which is an
        approximation of the columns the author wrote. It is exact whenever the
        cells before the stop were not themselves re-laid-out, which is the
-       common case for trailing comments and declaration bodies. ``P1-1``'s
-       trivia map records true original columns; once it exists, this
-       function should take them instead. Tracked as ``P2-6`` follow-up in
-       ``PLAN.md``.
+       common case for trailing comments and declaration bodies. The trivia
+       map records true original columns, and this function should take those
+       instead once the pipeline threads them through.
     """
     if len(members) < 2:
         return False

@@ -34,9 +34,9 @@ Formatting a file
    $ pssfmt --check src/pss/                # exit 1 if anything would change
    $ pssfmt --diff src/pss/my_component.pss # show what would change
 
-**Status: not implemented.** Blocked on the token and CST API in
-``pssparser`` (``PLAN.md`` ``U-1``--``U-3``), and then on the null round-trip
-formatter that proves the pipeline is lossless (``P1``).
+**Status: not implemented.** It waits on the style-rule layer; everything
+underneath it -- the token and tree API in ``pssparser``, the lossless
+round-trip, the verifier -- is built. See :doc:`status`.
 
 In CI
 -----
@@ -55,7 +55,7 @@ touched. Introducing that in v1 rather than v2 is deliberate: a formatter
 that can only be adopted by reformatting everything at once frequently is not
 adopted at all.
 
-**Status: not implemented** (``P4-1``, ``P4-4``).
+**Status: not implemented.**
 
 Turning it off
 --------------
@@ -76,7 +76,7 @@ Escape hatches are non-negotiable rather than a concession: a formatter
 without an off-switch will not be adopted in a codebase with hand-aligned
 register tables, and PSS codebases have those.
 
-**Status: not implemented** (``P3-9``, ``P4-3``).
+**Status: not implemented.**
 
 What is actually built
 ----------------------

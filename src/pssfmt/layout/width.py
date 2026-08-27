@@ -1,9 +1,13 @@
-"""Display width of a string -- the single call site for ``Q-6``.
+"""Display width of a string -- the one place width is defined.
 
-``formatter.md`` section 7.7 leaves open whether ``print_width`` counts
-characters or display columns. ``PLAN.md`` ``Q-6`` records the recommendation:
-count display columns, with East-Asian Wide and Fullwidth forms counted as two,
-and put the decision behind one function so it is one call site to change.
+Whether ``print_width`` counts characters or display columns is a real
+choice, and the two disagree wherever a PSS file contains a wide character --
+in a comment or a string literal, most often. This package counts **display
+columns**, with East-Asian Wide and Fullwidth forms counted as two, so that a
+line that looks like it fits does fit.
+
+The decision lives behind one function rather than in every caller, so that
+changing it is one edit rather than an audit.
 
 This module is that call site. Nothing else in the engine may use ``len()`` on
 text that will be rendered.

@@ -13,7 +13,6 @@ before Phase U lands.
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 from typing import Iterator, List, Tuple
 
@@ -109,40 +108,106 @@ class TestLayoutIsSelfContained:
 # T-13 -- rules consult the Style policy, never a literal
 # --------------------------------------------------------------------------
 
-# `Indent(x, 4)` and friends. A width argument that is a bare integer literal
-# means the rule decided a style question the Style object was supposed to own.
-_LITERAL_WIDTH = re.compile(r"\b(Indent|indent)\s*\([^()]*,\s*-?\d+\s*\)")
+#: Constructors whose numeric argument is a column count -- a style decision
+#: the resolved ``Style`` owns. ``Align``'s offset is exempt at zero, because
+#: "align to the current column" is a structural statement rather than a
+#: measurement.
+_COLUMN_ARGS = {"Indent": 1, "indent": 1, "Align": 1, "align_to": 1}
+
+#: Constructors that take literal output text. A rule emitting ``text(" ")``
+#: has decided a spacing question that :class:`pssfmt.style.Site` owns, and it
+#: is a likelier slip than a hardcoded indent because it looks so harmless.
+_TEXT_CTORS = {"Text", "text"}
+
+
+def _called_name(node: ast.Call) -> str:
+    """``Indent(...)`` and ``ir.Indent(...)`` both report ``Indent``."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
+def _style_literals(tree: ast.AST):
+    """Yields ``(lineno, description)`` for every hardcoded style constant."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _called_name(node)
+
+        pos = _COLUMN_ARGS.get(name)
+        if pos is not None:
+            args = list(node.args)
+            for kw in node.keywords:
+                if kw.arg in ("width", "offset"):
+                    args.append(kw.value)
+                    pos = len(args) - 1
+            if pos < len(args):
+                arg = args[pos]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, int) \
+                        and not isinstance(arg.value, bool):
+                    if not (name in ("Align", "align_to") and arg.value == 0):
+                        yield node.lineno, f"{name}(..., {arg.value})"
+
+        if name in _TEXT_CTORS:
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
+                        and arg.value and not arg.value.strip():
+                    yield node.lineno, f"{name}({arg.value!r})"
 
 
 class TestRulesUseTheStyleSeam:
     """``P3-0``: no rule module reads config or hardcodes a spacing constant.
 
-    Skips while ``rules/`` does not exist. That is deliberate -- the guard is
-    committed *before* the first rule so it can never be retrofitted onto a
-    module set that has already grown literals. ``PLAN.md`` section 6.3: the
-    exposed option count is reversible, this seam is not.
+    Written and committed before the first rule so it could never be
+    retrofitted onto a module set that had already grown literals
+    (``PLAN.md`` section 6.3: the exposed option count is reversible, this
+    seam is not). It skipped until ``P3-1`` created ``rules/``.
+
+    **It was also wrong for that whole time.** The first version matched
+    ``Indent`` with a regex whose argument class excluded parentheses, so
+    ``Indent(ctx.build(node), 4)`` -- the shape every real rule takes, because
+    the first argument is always a built subtree -- sailed past it. The guard
+    passed because its pattern could not match real code, which is the same
+    failure as a guard whose input is missing, wearing different clothes.
+    Matching the syntax tree instead is both simpler and immune to how the
+    call happens to be written across lines.
+
+    ``# T-13-allow`` suppresses a hit. It goes on the line the *call starts*
+    on, which for a call split across lines is the line with the opening
+    parenthesis rather than the line with the number.
     """
 
-    @pytest.mark.parametrize("path", python_files(RULES_DIR) or [None], ids=lambda p: getattr(p, "name", "no-rules-yet"))
-    def test_no_hardcoded_spacing_literal(self, path):
-        if path is None:
-            pytest.skip("rules/ does not exist yet (P3 not started)")
+    def test_the_directory_is_actually_there(self):
+        """A guard that silently guards nothing is worse than no guard.
+
+        This file's other half (``T-9``) has carried this test from the
+        start. ``T-13`` went without it while ``rules/`` did not exist, and
+        should not go without it now that it does.
+        """
+        assert python_files(RULES_DIR), f"no modules found under {RULES_DIR}"
+
+    @pytest.mark.parametrize("path", python_files(RULES_DIR), ids=lambda p: p.name)
+    def test_no_hardcoded_spacing_literal(self, path: Path):
         source = path.read_text(encoding="utf-8")
+        lines = source.splitlines()
+        tree = ast.parse(source, filename=str(path))
         hits = [
-            f"{path.name}:{i}: {line.strip()}"
-            for i, line in enumerate(source.splitlines(), 1)
-            if _LITERAL_WIDTH.search(line) and "T-13-allow" not in line
+            f"{path.name}:{lineno}: {what}"
+            for lineno, what in _style_literals(tree)
+            if "T-13-allow" not in lines[lineno - 1]
         ]
         assert not hits, (
-            "rules must ask the resolved Style per construct, e.g. "
-            "style.indent_for(Construct.COMPONENT_BODY) (PLAN.md section 6.3):\n  "
-            + "\n  ".join(hits)
+            "rules must ask the resolved Style per construct -- e.g. "
+            "style.indent_for(Construct.COMPONENT_BODY) or "
+            "style.gap(left, right) -- rather than writing the number "
+            "(PLAN.md section 6.3):\n  " + "\n  ".join(hits)
         )
 
-    @pytest.mark.parametrize("path", python_files(RULES_DIR) or [None], ids=lambda p: getattr(p, "name", "no-rules-yet"))
-    def test_no_rule_reads_config_directly(self, path):
-        if path is None:
-            pytest.skip("rules/ does not exist yet (P3 not started)")
+    @pytest.mark.parametrize("path", python_files(RULES_DIR), ids=lambda p: p.name)
+    def test_no_rule_reads_config_directly(self, path: Path):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         offenders = [
             f"{path.name}:{lineno} imports {module}"

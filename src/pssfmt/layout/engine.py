@@ -16,9 +16,11 @@ group that fits in isolation but is followed by ``);`` on the same line does
 not fit; :func:`fits` therefore continues into the enclosing command stack
 after exhausting the group.
 
-Column alignment is deliberately **not** here. It runs after line breaking, in
-:mod:`pssfmt.layout.align`, so it can never influence a fit decision
-(``formatter.md`` section 3.3).
+Column alignment is deliberately **not** here. It runs after line breaking,
+in :mod:`pssfmt.layout.align`, so it can never influence a fit decision --
+alignment depends on where lines end, and line breaking depends on how wide
+lines are, so running them in the other order makes them mutually recursive
+with no fixpoint guarantee.
 """
 
 from __future__ import annotations
