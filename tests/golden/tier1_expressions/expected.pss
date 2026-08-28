@@ -1,0 +1,20 @@
+// Tier 1: expressions. Operators, precedence, authored parentheses, calls,
+// casts, and one initializer long enough to need a break.
+
+package expr_pkg {
+
+    struct expr_s {
+        bit[32]  a = 1 + 2 * 3;
+        bit[32]  b = (1 + 2) * 3;
+        bit[32]  c = ((a));
+        bit[32]  d = a<<2 | b>>1;
+        bit[32]  e = -a + +b;
+        bool     f = a > 0 && b < 10 || !c;
+        bit[32]  g = a==b ? a : b;
+        bit[32]  h = arr[i + 1];
+        bit[32]  i = compute(a, b, -1);
+        bit[32]  j = (bit[32])other.field;
+        bit[32]  k =
+            pkg_name::CONSTANT_VALUE + other_pkg::SOME_OTHER_CONSTANT + a_third_term;
+    }
+}

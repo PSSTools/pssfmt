@@ -84,7 +84,7 @@ from ..layout import (ALIGN_MARK, LINE, SOFTLINE, Layout, concat, group,
                       indent, text)
 from ..style import Site
 
-__all__ = ["WORD", "Vocabulary", "must_separate", "emit_span"]
+__all__ = ["WORD", "Vocabulary", "must_separate", "floor_gap", "emit_span"]
 
 
 class _Word:
@@ -150,6 +150,39 @@ def must_separate(left: Any, right: Any) -> bool:
     if lt[-1] in _WORD_CHARS and rt[0] in _WORD_CHARS:
         return True
     return _munches(lt, rt)
+
+
+def floor_gap(width: int, left: Any, right: Any) -> int:
+    """*width*, raised to 1 where writing the two tokens together would relex.
+
+    :func:`must_separate` answers the question; this applies the answer, and
+    it exists because *applying* it is where the floor was being lost.
+    :func:`emit_span` is not the only place two tokens end up adjacent -- a
+    header meets its ``{`` and a declaration meets a stray ``;`` in
+    ``decls.py``, composed as layout rather than emitted from a span -- and a
+    floor that only one of the three consults is not a floor. ``P3-10`` found
+    both of the others by looking for the composition sites rather than by
+    reading the rule, which is the way to look for the next one.
+
+    Note this raises a gap and never lowers one: a style that asks for three
+    columns keeps them. More than one space after an escaped identifier is
+    harmless, because the identifier ends at the *first* whitespace character
+    and what follows it is not part of the token -- so the alignment pass may
+    pad past one and ``formatter.md`` section 4.4's "exactly one space" is
+    satisfied by any positive number.
+
+    *left* and *right* are in **source order**, and :func:`must_separate` is
+    genuinely asymmetric -- ``/`` then ``*`` opens a comment while ``*`` then
+    ``/`` does not. Passing them the other way round is nevertheless a mutant
+    no test kills, and the reason is worth recording rather than testing
+    around: for all twelve asymmetric pairs the direction that answers *true*
+    is a compound operator -- ``->``, ``-=``, ``+=``, ``>=``, ``<=``, ``/*``
+    -- and the grammar cannot put its two halves adjacent as separate tokens.
+    So a reversed call can only add a space that was not needed; it can never
+    drop one that was. Killing it would mean asserting exact column counts
+    under a style nothing ships and ``docs/style.rst`` does not promise.
+    """
+    return 1 if width == 0 and must_separate(left, right) else width
 
 
 def _munches(lt: str, rt: str) -> bool:
@@ -277,11 +310,9 @@ def emit_span(ctx: Any,
         if pos != first:
             if not _discardable(entry.raw_leading):
                 return None
-            gap = ctx.style.gap(prev_site, site)
-            if gap == 0 and (must_separate(prev_token, token)
-                             or (separate is not None
-                                 and separate(prev_token, token,
-                                              prev_site, site))):
+            gap = floor_gap(ctx.style.gap(prev_site, site), prev_token, token)
+            if gap == 0 and separate is not None and separate(
+                    prev_token, token, prev_site, site):
                 gap = 1
             original = _original_gap(trivia, code, pos)
             if pos == break_at:

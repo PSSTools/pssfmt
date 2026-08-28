@@ -1,0 +1,22 @@
+// Escaped identifiers, in the positions the rules can put them. The golden
+// exists to pin the whitespace: every space in expected.pss that touches an
+// escaped identifier is load-bearing, not cosmetic.
+
+package escaped_pkg {
+
+    struct \escaped-struct {
+        bit[8]    \busa+index ;
+        bit[32]   \-clock ;
+        bit[64]   \{a,b} ;
+        bit[8]    \a*(b+c) ;
+        bit[8]    plain_name;
+    }
+
+    component \top-level_c {
+        action \do-write {
+            constraint \c1 {
+                \busa+index > 0;
+            }
+        }
+    }
+}

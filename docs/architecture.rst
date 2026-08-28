@@ -147,6 +147,21 @@ program that parses -- so the floor is now maximal munch stated directly, and
 it is verified against the real lexer over every ordered pair of lexemes
 rather than against a hand-written list of hazards.
 
+Stating the floor correctly turned out to be the easier half. The harder half
+is that a floor is only a floor if **every** place two tokens are written next
+to each other consults it, and the token emitter is not the only such place: a
+declaration header is composed against its ``{``, and a declaration against a
+stray ``;``, as layout rather than as a span of tokens. Both were written long
+before the floor had anything to say to them, and both were missing it -- one
+visible only under a non-default spacing, the other reachable at the default
+by any file with a syntax error in it. The fail-safe meant neither could
+corrupt anything; the symptom was a correct file silently declining to format.
+
+The lesson generalises past this floor, to any invariant that a helper
+enforces rather than the type system: *the way to audit it is to enumerate the
+call sites, not to re-read the rule.* Re-reading the rule confirms the rule,
+which was never the thing that was wrong.
+
 A rule set that is incomplete on purpose has one failure mode that its own
 tests cannot see, and it is worth naming because it took a while to find. A
 rule can only run on a node whose ancestors all have rules, so **an unwritten
@@ -163,6 +178,16 @@ and *coverage of the rules that ran* are different measurements, and only the
 second one finds this. Counting how often each builder is actually reached is
 now part of finishing a rule module, and a builder that the corpus never
 reaches is treated as untested however green the suite is.
+
+That measurement is now a test rather than a habit. It instruments the rule
+registry, formats the corpus, and pins the set of builders no corpus file
+reaches -- as an equality, so a construct *gaining* corpus coverage fails too,
+because the comment claiming it had none has stopped being true. Two builders
+are in that set today, and each names where it is covered instead. The
+distinction it keeps alive is the one that took two releases to learn: being
+reached by a hand-written example and being reached by PSS somebody wrote are
+different facts, and only the second supports a claim that begins "measured
+across 92 files".
 
 The measurement earned itself back on the next module. Template arguments are
 137 lists across 34 files, every test passes and the corpus is quiet -- and

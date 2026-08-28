@@ -1,0 +1,16 @@
+// Tier 3: template argument lists, on types and on declarations.
+
+package template_pkg {
+
+    struct packed_s   <   type T , int W = 32 > {
+        T          value;
+        bit[W]     raw;
+    }
+
+    struct user_s {
+        packed_s<bit[8], 4> small;
+        packed_s<bit[32], 64> large;
+        empty_c<> nothing;
+        nested_s<packed_s<bit, 8>> nested;
+    }
+}

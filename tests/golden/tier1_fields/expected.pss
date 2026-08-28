@@ -1,0 +1,34 @@
+// Tier 1: field declarations, and what the alignment pass does to blocks of
+// them. Three blocks on purpose: one the author aligned by hand, one they
+// did not, and one where the padding is too ragged to be a table.
+
+package field_pkg {
+
+    struct hand_aligned_s {
+        // A table somebody spent time on. It must survive.
+        rand bit[8]     opcode;
+        rand bit[32]    address;
+        bit[64]         payload;
+        bool            valid;
+    }
+
+    struct not_aligned_s {
+        rand bit[8] opcode;
+        rand bit[32] address;
+        bit[64] payload;
+        bool valid;
+    }
+
+    struct ragged_s {
+        rand bit[8] opcode;
+        rand bit[32] address;
+        bit[64] payload;
+        bool valid;
+    }
+
+    struct qualifiers_s {
+        static const bit[8] width = 8;
+        static const bit[8] depth = 4;
+        rand config_s cfg;
+    }
+}

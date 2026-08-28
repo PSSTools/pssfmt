@@ -1,0 +1,39 @@
+// Tier 1: packages, imports, components, structs, actions, extend.
+// Deliberately untidy -- braces adrift, members unindented, blank lines
+// piled up -- so that "expected.pss is what the formatter produces" is a
+// claim about formatting rather than about copying.
+
+package   dma_pkg   {
+
+import   addr_reg_pkg::*;
+    import   executor_pkg :: * ;
+
+
+
+struct   config_s   {
+bit[8]   channel;
+        bit[32]  length;   // how many bytes
+}
+
+    component   dma_c
+    {
+        // The pool that every transfer draws from.
+addr_handle_t   mem_pool;
+
+        action   transfer_a   {
+            input   config_s   cfg;
+output  config_s   done;
+        }
+
+action   noop_a { }
+    }
+}
+
+package   extra_pkg {
+    extend   component   dma_c   {
+        // Added out of line, in a second package.
+bit[4]   priority;
+    }
+
+    extend   action   dma_c::transfer_a { bit  retry; }
+}

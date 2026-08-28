@@ -1,0 +1,32 @@
+// Tier 2: constraints. Named blocks, inline items, implication, soft, and
+// default -- the last two are the constructs no corpus file reaches, which
+// is why they are here.
+
+package constraint_pkg {
+
+    struct packet_s {
+        rand bit[8]   kind;
+        rand bit[32]  length;
+        rand bool     urgent;
+
+        constraint sane_c {
+            length > 0;
+            length <= 4096;
+        }
+
+        constraint implications_c {
+            kind == 0 -> length == 64;
+            urgent -> length < 128;
+        }
+
+        constraint defaults_c {
+            soft length   == 256;
+            default kind == 1;
+            default disable urgent;
+        }
+
+        constraint in_c {
+            kind in [0..7];
+        }
+    }
+}

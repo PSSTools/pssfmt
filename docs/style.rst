@@ -587,6 +587,34 @@ cannot refuse it, so under a changed ``indent_width`` the first line moves
 and the rest keep the columns you gave them. That is what keeps the table a
 table; the raggedness at the top edge is the price.
 
+Escaped identifiers
+-------------------
+
+``\busa+index``, ``\{a,b}``, ``\***error-condition***``: a backslash followed
+by everything up to the **next whitespace character**. That last part is the
+whole of the rule, and it is unlike anything else in the language, because it
+makes a space part of the token rather than part of the gap between tokens.
+
+So ``pssfmt`` always leaves at least one whitespace character on each side of
+one, and no setting can reduce it to zero::
+
+    int \busa+index ;          // the space before the ``;`` is not optional
+    component \top-level_c {   // nor the one before the ``{``
+
+Written tight, ``\busa+index;`` is a *single identifier* whose name ends in a
+semicolon, and ``\top-level_c{`` is a single identifier that has eaten the
+brace opening the component body. Both still parse, which is what makes this
+worth a section: nothing about the result looks wrong.
+
+Two consequences follow, and the second one usually surprises people:
+
+* **More than one space is fine.** The identifier ends at the *first*
+  whitespace character, so column alignment may pad past a single space
+  without changing the name.
+* **A line break is fine.** A newline is whitespace like any other, so
+  ``pssfmt`` may break a long expression next to an escaped identifier just as
+  it would anywhere else. There is no rule keeping breaks away from them.
+
 What ``pssfmt`` will never do
 -----------------------------
 

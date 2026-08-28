@@ -1,0 +1,27 @@
+// The escape hatches. The point of a golden here is that the *frozen*
+// regions must appear in expected.pss byte for byte, while everything
+// around them is reformatted -- which a snippet test cannot show.
+
+package hatch_pkg {
+
+    struct formatted_s {
+        rand bit[8] a;
+        rand bit[32] b;
+    }
+
+    struct frozen_s {
+        // pssfmt off
+        bit[8]   opcode;      //  hand-built table
+        bit[32]  address;     //  columns chosen by a person
+        bit[64]  payload;     //  and not to be touched
+        // pssfmt on
+
+        rand bit[8] after_the_hatch;
+    }
+
+    struct ignored_s {
+        // pssfmt ignore
+        bit[8]   only_this_one_is_frozen;
+        rand bit[32] but_not_this_one;
+    }
+}

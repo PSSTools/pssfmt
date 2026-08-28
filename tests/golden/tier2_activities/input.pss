@@ -1,0 +1,40 @@
+// Tier 2: activities. Traversal, sequence, parallel, schedule, select,
+// repeat, and binds.
+
+package activity_pkg {
+
+    component dma_c {
+
+        action transfer_a {
+            input  data_s  src;
+            output data_s  dst;
+        }
+
+        action compound_a {
+            transfer_a   first;
+            transfer_a   second;
+            transfer_a   third;
+
+            activity   {
+first;
+                parallel   {
+                    second;
+third;
+                }
+
+                schedule { second; third; }
+
+                select   {
+first;
+                    second;
+                }
+
+                repeat   (4)   {
+first;
+                }
+
+                bind   first.dst   second.src;
+            }
+        }
+    }
+}

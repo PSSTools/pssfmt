@@ -65,7 +65,7 @@ from .emit import (
     verbatim_layout,
 )
 from .exprs import sites_for
-from .tokens import WORD, emit_span
+from .tokens import WORD, emit_span, floor_gap
 
 #: ``struct_kind`` covers five spellings that lay out the same way but are
 #: separate members of :class:`~pssfmt.style.Construct`, so a house style can
@@ -666,7 +666,26 @@ def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
             tail = _trailing(ctx, ctx.trivia.code_indices[span[1]])
             if tail is _BAIL:
                 return None
-            parts = [members[-1].layout, text(";")]
+            # The ``;`` is written tight against what it terminates, by
+            # intent -- this merge does not consult the style at all. The
+            # lexical floor still applies, and here it is not theoretical:
+            # error recovery is one of the two things this merge exists for,
+            # and a recovered fragment can end in an escaped identifier, which
+            # swallows a ``;`` written against it (``P3-10``).
+            #
+            # ``spans[-1][1]`` is the member's last token, which is what the
+            # ``;`` is written against. Reaching for ``[0]`` instead is a
+            # mutant nothing kills, and the measurement says why: across the
+            # corpus and every probe, 42 merges, and the only ones where the
+            # two indices differ are block declarations -- keyword first,
+            # ``}`` last, neither of which the floor has anything to say
+            # about. The floor can only fire on a *single-token* recovered
+            # fragment, where the indices coincide. Correct by argument
+            # rather than by test, so the argument is written down.
+            semi = ctx.trivia.of(ctx.trivia.code_indices[span[0]]).token
+            prev_last = ctx.trivia.of(ctx.trivia.code_indices[spans[-1][1]]).token
+            parts = [members[-1].layout,
+                     text(" " * floor_gap(0, prev_last, semi) + ";")]
             if tail is not None:
                 parts.append(tail)
             members[-1] = _Member(members[-1].blanks_before, concat(parts))
@@ -743,6 +762,18 @@ def _template_sites(ctx: Any, node: Any, first: int, last: int) -> Any:
     asking it would let a single declined construct anywhere in the body --
     ``a**2`` is one, and the corpus has it in two files -- refuse the header
     of the thing containing it. It would be quadratic as well.
+
+    *last* is the ``{`` position, and the bound below is ``>=`` rather than
+    ``>`` for a reason worth stating, because ``>`` is what was written first
+    and it defeated the paragraph above. Where the braces belong to a *child*
+    node rather than to *node* itself -- a ``constraint``, whose block is its
+    own rule, and ``repeat (4) { … }`` for the same reason -- that child's
+    span begins exactly *at* the brace. So ``>`` let it through, ``sites_for``
+    was handed the entire body, and one unclassifiable item anywhere inside
+    refused the header: ``constraint   defaults_c {`` kept the author's
+    spacing because a ``default`` item four lines below could not be
+    classified. Found by ``T-6``, which is the first test to look at a whole
+    formatted file rather than at the construct it was checking.
     """
     trivia = ctx.trivia
     sites: dict = {}
@@ -750,7 +781,7 @@ def _template_sites(ctx: Any, node: Any, first: int, last: int) -> Any:
         if not child.is_rule:
             continue
         span = code_span(trivia, child)
-        if span is None or span[0] > last:
+        if span is None or span[0] >= last:
             continue
         found = sites_for(ctx, child)
         if found is None:
@@ -815,7 +846,19 @@ def _header(ctx: Any, node: Any, open_child: Any,
 
     head = span_text(trivia, first, brace_pos - 1, leading=False)
     tokens = span_tokens(trivia, first, brace_pos - 1, leading=False)
-    gap = " " * ctx.style.gap(None, Site.BRACE_OPEN)
+    # ``emit_span`` declined this header, so its floor did not run -- but the
+    # brace is still being written against the header's last token. Today's
+    # ``BRACE_OPEN.before`` is 1, which hides this; configure it to 0 and
+    # ``component /* c */ \esc {`` becomes ``\esc{``, one identifier, and the
+    # block structure of the file is gone (``P3-10``).
+    # Argument order is unobservable at *this* site specifically: no token
+    # that can end a header is asymmetric against ``{`` under
+    # ``must_separate``, since ``{`` is neither a word character nor half of
+    # any longer lexeme. Only the escaped-identifier branch can fire here, and
+    # that one is symmetric. Source order anyway -- see ``floor_gap``.
+    last = trivia.of(trivia.code_indices[brace_pos - 1]).token
+    brace = trivia.of(open_child.token_index).token
+    gap = " " * floor_gap(ctx.style.gap(None, Site.BRACE_OPEN), last, brace)
     return concat([reindented_layout(tokens, head, origin), text(gap + "{")])
 
 
