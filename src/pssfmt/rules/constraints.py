@@ -87,7 +87,7 @@ made.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Tuple
 
 from ..layout import Layout
 from ..style import Construct, Site
@@ -143,6 +143,62 @@ _EXTRA_SITES = {
 }
 
 
+#: The grammar's binary-operator rules, as :mod:`pssfmt.rules.exprs` names
+#: them. Used only to count: see :func:`_operator_stop`.
+_BINARY_OPS = frozenset({
+    "add_sub_op", "mul_div_mod_op", "logical_inequality_op", "eq_neq_op",
+    "logical_and_op", "logical_or_op", "binary_and_op", "binary_or_op",
+    "binary_xor_op", "shift_op",
+})
+
+
+def _operator_stop(ctx: Any, node: Any) -> Tuple[int, ...]:
+    """The column a hand-aligned constraint block lines up its operator on::
+
+        dst.mem.size == src.mem.size;
+        dst.pattern  == src.pattern;
+        dst.seed     == src.seed;
+                    ^^
+
+    Returned **only** when the item contains exactly one binary operator, and
+    that restriction is the whole design. "The column is before the operator"
+    is unambiguous for ``a == b`` and a choice for ``a && b == c`` -- and
+    which operator a nested expression would align on is a decision the
+    corpus has not made. One operator, one candidate, nothing to decide.
+
+    The evidence for the *padding* is thin and stated as such: two instances,
+    in one file, against 72 written tight across 17. On its own that is one
+    voice, and ``P3-4`` declined ``**`` on exactly that basis.
+
+    What makes this different is that a stop is not a decision to pad. It says
+    a column may exist here; :func:`~pssfmt.layout.align._was_aligned` then
+    reads each block's own spacing and reproduces or flushes accordingly. All
+    72 tight instances are unaffected either way -- with no padding to find,
+    the block flushes left and lands back on the single space it already had.
+    So the choice here is not "align constraints or not"; it is whether an
+    author's existing table survives contact with the formatter, and the
+    project's contract already answers that.
+    """
+    ops = []
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        if not cur.is_rule:
+            continue
+        if cur.rule_name in _BINARY_OPS:
+            ops.append(cur)
+            continue
+        stack.extend(reversed(cur.children))
+    # One guard, not two. An early ``return`` on the second operator would be
+    # a free optimisation and would also make this check unremovable without
+    # a test noticing -- the redundancy ``P3-4`` found in its ``>>`` guard and
+    # fixed the same way.
+    if len(ops) != 1:
+        return ()
+    span = code_span(ctx.trivia, ops[0])
+    return () if span is None else (span[0],)
+
+
 def _statement(ctx: Any, node: Any) -> Layout:
     """*node* written out on one line, or reproduced if it is not ours."""
     span = code_span(ctx.trivia, node)
@@ -159,7 +215,7 @@ def _statement(ctx: Any, node: Any) -> Layout:
     # true zero times; dead code that adds a space reads as a decision somebody
     # made, and this one nobody had to.
     emitted = emit_span(ctx, span[0], span[1], _ITEM_VOCABULARY,
-                        sites_at=sites)
+                        sites_at=sites, mark_at=_operator_stop(ctx, node))
     return emitted if emitted is not None else _reproduce(ctx, node)
 
 

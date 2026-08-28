@@ -224,8 +224,8 @@ look like one. The corpus's 65 expression parens split cleanly between them
      - ``write32(handle, value)``
    * - Control keyword
      - one space after the keyword
-     - 118 / 118
-     - ``if (x)``, ``foreach (i : list)``
+     - 118 / 118, and 3 / 3
+     - ``if (x)``, ``repeat (4)``
    * - Grouping and cast
      - tight inside
      - 12 / 12, 13 / 13
@@ -347,6 +347,15 @@ draws independently.
    voices space it (36 instances); the code generator does not (84). The
    decision was made in favour of the humans, and lowRISC agrees: *"When
    labeling code blocks, add one space before and after the colon."*
+
+   Because it is a preference rather than a measurement, **it is not
+   applied**: an activity label (``a: do step;``) and a ``repeat (i : 4)``
+   iterator are reproduced as written. All eight activity labels in the corpus
+   are in a single file, and there is exactly one iterator colon -- one voice
+   and one instance respectively, which is how much evidence would be needed
+   to promote a preference into a rule the formatter acts on. The row stays on
+   this page because the *default* is decided; what is missing is the standing
+   to use it.
 
 Two questions the corpus argued about
 -------------------------------------

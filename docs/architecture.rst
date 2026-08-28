@@ -130,6 +130,23 @@ program that parses -- so the floor is now maximal munch stated directly, and
 it is verified against the real lexer over every ordered pair of lexemes
 rather than against a hand-written list of hazards.
 
+A rule set that is incomplete on purpose has one failure mode that its own
+tests cannot see, and it is worth naming because it took a while to find. A
+rule can only run on a node whose ancestors all have rules, so **an unwritten
+rule high in the tree hides every defect below it**. ``extend`` is the
+worked example: 31 of the 92 corpus files put their declarations inside one,
+and until ``extend`` had a rule, every rule that would have applied within
+those files was inert. The field rules had been flattening hand-built
+alignment tables in eight of them for two releases -- reachable by any user
+who did not happen to use ``extend``, and invisible to a corpus gate that
+compares whole files.
+
+The lesson is not "write more rules". It is that *coverage of the corpus text*
+and *coverage of the rules that ran* are different measurements, and only the
+second one finds this. Counting how often each builder is actually reached is
+now part of finishing a rule module, and a builder that the corpus never
+reaches is treated as untested however green the suite is.
+
 That last boundary is worth being blunt about, because it is the one with a
 deadline. How many options ``pssfmt`` *exposes* is reversible at any time.
 Whether rules are *written against a style policy at all* is decided by the

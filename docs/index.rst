@@ -6,12 +6,12 @@ A formatter for the Accellera Portable Test and Stimulus Standard.
 .. warning::
 
    **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
-   declarations, their bodies and their headers, ``import`` statements, field
-   declarations, expressions and constraints; every other construct is
-   reproduced exactly until its rule is written. That is by design rather than
-   by accident: a construct with no rule falls back to the formatter that
-   changes nothing, so an incomplete rule set cannot corrupt anything, and
-   adding a rule cannot make an unrelated construct worse.
+   declarations, their bodies and their headers, ``extend`` blocks, ``import``
+   statements, field declarations, expressions, constraints and activities;
+   every other construct is reproduced exactly until its rule is written. That
+   is by design rather than by accident: a construct with no rule falls back to
+   the formatter that changes nothing, so an incomplete rule set cannot corrupt
+   anything, and adding a rule cannot make an unrelated construct worse.
 
    :doc:`status` says what is built, what is not, and in what order the
    rest lands.

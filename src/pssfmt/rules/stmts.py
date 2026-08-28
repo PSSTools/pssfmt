@@ -136,49 +136,94 @@ def _around_a_bind_wildcard(left: Any, right: Any) -> bool:
     return right.type_name == "TOK_ASTERISK" and left.type_name in _WORD_LIKE
 
 
+#: The node boundaries a hand-aligned field declaration lines up on.
+#:
+#: Every one is a *rule* boundary rather than a token adjacency, which is what
+#: makes taking them from the tree exact: inferring the end of a type from
+#: tokens would mean re-deciding where a type ends, and the grammar has
+#: already decided.
+#:
+#: ``flow_object_type`` and ``object_ref_field`` were added in ``P3-6``, and
+#: the reason they were missing is worth recording. They belong to
+#: ``input``/``output``/``lock``/``share`` fields, which have no
+#: ``data_instantiation`` at all -- a different production with the same
+#: shape -- so through ``P3-5`` those fields got *no* stops and any column an
+#: author had built in one was collapsed. That went unnoticed because 31 of
+#: the 92 corpus files put their actions inside an ``extend``, which had no
+#: rule, so the damage was unreachable. Registering ``extend_stmt`` made it
+#: reachable, and the corpus reported it as eight files of flattened tables.
+#:
+#: The evidence for the two seams, over the corpus::
+#:
+#:     before object_ref_field   24 padded (17 files)   10 tight (2 files)
+#:     before flow_object_type   10 padded ( 8 files)   13 tight (9 files)
+#:
+#: The second is genuinely mixed, and is marked anyway, because a stop is not
+#: a decision to pad: :func:`~pssfmt.layout.align._was_aligned` reads each
+#: block's own columns and reproduces or flushes accordingly. Marking a seam
+#: says a column may exist there, and declining to mark one is what makes it
+#: impossible for the author's to survive.
+#:
+#: The gap before ``rand``/``static const`` and the type is deliberately *not*
+#: here: the corpus pads it zero times.
+#: ``resource_object_type`` is ``lock``/``share`` what ``flow_object_type`` is
+#: to ``input``/``output``: the same column in a third production. Omitting it
+#: does not merely lose that field's own column, it destroys the whole
+#: block's -- a ``lock`` line among ``input`` lines contributes one stop where
+#: its neighbours contribute two, so the group's shared column count drops to
+#: one and every line is measured on a cell that has already been collapsed.
+_SEAM_RULES = ("data_instantiation", "flow_object_type", "resource_object_type",
+               "object_ref_field")
+
+
 def _column_stops(ctx: Any, node: Any) -> tuple:
     """Where a hand-aligned field declaration puts its columns.
 
-    Two of them, and both are needed together::
+    For an attribute, two of them, and both are needed together::
 
         static const bit[64]  SPI_CTRL_OFF   = 0x00;
         static const bit[64]  SPI_STATUS_OFF = 0x08;
                             ^^             ^^
 
-    The first is the seam between the type and the declarator, which the
-    grammar makes a *node* boundary (``data_declaration`` is ``data_type
-    data_instantiation ';'``) rather than a token adjacency. Taking it from
-    the tree is exact; inferring it from tokens would mean re-deciding where a
-    type ends.
+    The first is the seam between the type and the declarator. The second is
+    the gap before ``=``. Marking only the first looks like it works and is
+    not: where every type is the same width -- which is the usual case in a
+    table of constants -- the first column is already consistent at one space,
+    so the block is reproduced with its ``=`` column collapsed and nothing
+    reports a problem.
 
-    The second is the gap before ``=``. Marking only the first looks like it
-    works and is not: where every type is the same width -- which is the usual
-    case in a table of constants -- the first column is already consistent at
-    one space, so the block is reproduced with its ``=`` column collapsed and
-    nothing reports a problem.
+    A flow or resource reference has the same two-column shape written with
+    different productions, and no ``=`` to make a third::
 
-    Empty for the rules with no ``data_instantiation``, ``pool`` and ``bind``,
-    which are 20 members between them in the corpus and are not written as
-    tables.
+        input  mem_blk_s   src;
+        output spi_data_s  data;
+        lock   dma_chan_s  ch;
+              ^           ^
+
+    Empty for ``pool`` and ``bind``, which have no seam rule below them.
     """
+    code = ctx.trivia.code_indices
+    stops: list = []
     stack = [node]
     while stack:
         cur = stack.pop()
         if not cur.is_rule:
             continue
-        if cur.rule_name == "data_instantiation":
+        if cur.rule_name in _SEAM_RULES:
             span = code_span(ctx.trivia, cur)
             if span is None:
                 return ()
-            stops = [span[0]]
-            code = ctx.trivia.code_indices
+            stops.append(span[0])
             for pos in range(span[0] + 1, span[1] + 1):
                 if ctx.trivia.of(code[pos]).token.type_name == "TOK_SINGLE_EQ":
                     stops.append(pos)
                     break
-            return tuple(stops)
+            # A seam's own subtree holds no further seam, and descending into
+            # it would let a nested declaration contribute a column to the
+            # statement containing it.
+            continue
         stack.extend(reversed(cur.children))
-    return ()
+    return tuple(stops)
 
 
 def _tree_sites(ctx: Any, node: Any) -> Any:
@@ -210,11 +255,11 @@ def _statement(ctx: Any, node: Any, vocabulary: Any, separate: Any,
                         separate=separate,
                         mark_at=stops,
                         sites_at=sites,
-                        break_at=_break_after_assign(stops))
+                        break_at=_break_after_assign(ctx, span))
     return emitted if emitted is not None else _reproduce(ctx, node)
 
 
-def _break_after_assign(stops: tuple) -> Any:
+def _break_after_assign(ctx: Any, span: tuple) -> Any:
     """The one place a field declaration may be split: just after its ``=``.
 
     ``P3-3`` could join any wrapped declaration back onto one line because a
@@ -227,10 +272,19 @@ def _break_after_assign(stops: tuple) -> Any:
     the corpus has and therefore the weakest claim available: it reproduces
     what the author did rather than deciding anything they did not. Where a
     field has no ``=`` there is nothing to say and no break is offered.
+
+    The ``=`` is located by token type rather than by index into the column
+    stops, which is what it was through ``P3-5``. That worked only while every
+    statement with two stops had an ``=`` as the second one, and ``P3-6``'s
+    flow-reference seams broke the coincidence: ``output spi_data_s data;``
+    has two stops and no ``=``, and the old form would have offered a break
+    after its declarator.
     """
-    if len(stops) < 2:
-        return None
-    return stops[1] + 1
+    code = ctx.trivia.code_indices
+    for pos in range(span[0], span[1] + 1):
+        if ctx.trivia.of(code[pos]).token.type_name == "TOK_SINGLE_EQ":
+            return pos + 1
+    return None
 
 
 def _reproduce(ctx: Any, node: Any) -> Layout:

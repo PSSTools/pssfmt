@@ -66,6 +66,23 @@ SHIPPED = {
     "soft_constraint_item",
     "default_constraint",
     "default_disable_constraint",
+    # P3-6, activities. Two shapes: five blocks (plus `repeat`, whose braces
+    # live in the statement it wraps) and three one-line statements. The
+    # traversal builder is registered on the two inner spellings rather than
+    # on `activity_action_traversal_stmt`, which is a passthrough wrapper.
+    "activity_declaration",
+    "activity_sequence_block_stmt",
+    "activity_parallel_stmt",
+    "activity_schedule_stmt",
+    "activity_select_stmt",
+    "activity_repeat_stmt",
+    "activity_bind_stmt",
+    "action_handle_traversal_stmt",
+    "action_type_traversal_stmt",
+    # P3-6, and a declaration body that should have shipped in P3-2: 31 of the
+    # corpus's 92 files open an `extend`, and everything inside one was
+    # unreachable until it was registered.
+    "extend_stmt",
 }
 
 

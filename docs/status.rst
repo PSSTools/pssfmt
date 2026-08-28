@@ -4,11 +4,11 @@ Project status
 .. warning::
 
    **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
-   declarations, their bodies and headers, ``import`` statements, field
-   declarations, expressions and constraints; everything else in a file is
-   reproduced exactly. This page says what is built, what is not, and in what
-   order the rest lands -- so that the gap is visible rather than inferred
-   from a command that does not work.
+   declarations, their bodies and headers, ``extend`` blocks, ``import``
+   statements, field declarations, expressions, constraints and activities;
+   everything else in a file is reproduced exactly. This page says what is
+   built, what is not, and in what order the rest lands -- so that the gap is
+   visible rather than inferred from a command that does not work.
 
 Built and tested
 ----------------
@@ -116,6 +116,36 @@ goes relative to its brace, what the iterator colon in ``foreach (i : list)``
 looks like, whether a ``{a, b}`` list brace follows the rule measured on 725
 declaration bodies. One example cannot settle any of those.
 
+**Activities.** ``do mem_copy_a;``, ``parallel { … }``, ``repeat (4) { … }``,
+``bind fill_copy.blk copy.src;`` -- the traversals an activity is mostly made
+of, and the blocks that frame them.
+
+Worth knowing what the shape of this turned out to be, because it is not what
+a reading of the PSS grammar suggests. The control-flow keywords -- ``select``,
+``schedule``, ``parallel``, ``repeat``, ``sequence`` -- are 22 instances in the
+whole corpus between them. The list of actions being traversed is 83. So an
+activity is a list of statements with a keyword around it, and both halves are
+shapes ``pssfmt`` already had: a block is a declaration body with a different
+word in front of it, and a traversal is a scoped name and a semicolon. Not one
+new spacing rule was needed for any of it.
+
+Left alone, each for a reason on the same page as the others: inline
+constraints (``do step with { … }``), labels (``a: do step;``), guarded and
+weighted ``select`` branches, ``if``/``else``, ``foreach``, ``match``,
+``replicate``, and the ``monitor`` operators. Every one is a construct the
+corpus contains once, or contains only in a single file -- and a single file
+is one author's habit rather than a convention.
+
+**Extensions.** ``extend component spi_c { … }``. A body like any other, and
+mentioned separately only because of what it was hiding. 31 of the corpus's 92
+files open an ``extend``, and since a rule cannot lay out a node whose parent
+has none, *everything* inside those 31 files was being reproduced no matter
+how many rules had been written for it. That included alignment tables in
+eight files that the field rules were quietly flattening -- a defect that
+existed, was reachable by any user who did not use ``extend``, and could not
+be seen from the test corpus until ``extend`` itself had a rule. It is fixed:
+``input``/``output``/``lock`` fields now keep their columns.
+
 **Column alignment.** ``infer``: a block that was already aligned comes back
 exactly as written, and one that was not is set flush left. This is what makes
 the field rules safe to turn on -- without it they would flatten every
@@ -149,11 +179,12 @@ Not built yet
      - What is missing
    * - **Style rules**
      - Most of them. Declarations, their bodies and their headers are
-       formatted, as are ``import`` statements, field declarations,
-       expressions and constraints; other statements, activities, coverage and
-       template parameter lists are not, and are reproduced exactly until
-       they are. Expressions *inside* those constructs are reproduced with
-       them: a rule cannot lay out a node whose parent has no rule.
+       formatted, as are ``extend`` blocks, ``import`` statements, field
+       declarations, expressions, constraints and activities; procedural
+       statements, ``exec`` bodies, coverage and template parameter lists are
+       not, and are reproduced exactly until they are. Expressions *inside*
+       those constructs are reproduced with them: a rule cannot lay out a node
+       whose parent has no rule.
    * - **Command line**
      - ``pssfmt -i``, ``--check``, ``--diff``, ``--lines``. See
        :doc:`quickstart` for the intended interface.

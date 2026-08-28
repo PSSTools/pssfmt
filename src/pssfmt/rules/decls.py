@@ -103,6 +103,31 @@ _PASSTHROUGH = (
     "constraint_body_item",
     "constraint_set",
     "default_constraint_item",
+    # ``P3-6``. Four wrappers cover one activity statement:
+    # ``activity_stmt_ann`` -> ``activity_stmt`` -> ``activity_labeled_stmt``
+    # -> ``labeled_activity_stmt`` -> the statement itself.
+    #
+    # A *labelled* statement stops the walk here rather than needing a rule to
+    # decline it, and that is worth saying because it is the whole treatment
+    # of labels in ``P3-6``: ``a: do step;`` makes ``activity_labeled_stmt``
+    # two rules plus a bearing ``:``, which the guard below already refuses to
+    # look through. All eight labels in the corpus are in one file, so one
+    # voice, so undecided -- and the label colon's default in ``style.py`` is
+    # marked "by preference" for exactly that reason. It stays unused.
+    "activity_stmt_ann",
+    "activity_stmt",
+    "activity_labeled_stmt",
+    "labeled_activity_stmt",
+    # A ``select`` branch. Plain branches are a wrapper like the others; a
+    # *guarded* or *weighted* one -- ``(mode == FAST) [3]: do fast_step;`` --
+    # carries its guard and weight as bearing tokens, so the guard above stops
+    # the walk and the branch is reproduced. One corpus instance, and it needs
+    # a label colon and a weight bracket that is none of the four measured.
+    "select_branch",
+    # ``activity_action_traversal_stmt`` wraps the handle and type spellings
+    # of the same statement; both are laid out by one builder, registered on
+    # the two inner rules rather than on this wrapper.
+    "activity_action_traversal_stmt",
 )
 
 
@@ -140,6 +165,19 @@ _HEADER_VOCABULARY = {
     # only ``:`` reachable in a span of these tokens is still that one.
     "TOK_CONSTRAINT": WORD,
     "TOK_DYNAMIC": WORD,
+    # ``extend component spi_c {``, ``extend action dma_c::xfer {`` -- 32
+    # instances across 31 files, in five shapes, all of them this one
+    # (``P3-6``). ``extend`` reuses the object-kind keywords already here, so
+    # the only genuinely new token is ``::``.
+    #
+    # Neither addition weakens the closure argument the colon rests on: no
+    # span of these tokens can contain a ``[`` or a case, so ``:`` is still
+    # unambiguously inheritance. ``:`` next to ``:`` is a *lexical* question
+    # rather than a spacing one, and ``must_separate`` already answers it --
+    # emitting ``a : :b`` for ``a::b`` would be a different program, which is
+    # the merge ``P3-4`` made the emitter check for.
+    "TOK_EXTEND": WORD,
+    "TOK_DOUBLE_COLON": Site.SCOPE_RESOLUTION,
     "ID": WORD,
     "ESCAPED_ID": WORD,
     "TOK_COLON": Site.COLON_INHERITANCE,
@@ -536,16 +574,27 @@ def _members_of(ctx: Any, node: Any, open_at: int, close_at: int) \
     return members
 
 
-def _header(ctx: Any, node: Any, open_child: Any) -> Layout:
+def _header(ctx: Any, node: Any, open_child: Any,
+            vocabulary: Any = None, sites: Any = None) -> Layout:
     """Everything up to and including ``{``.
 
-    Written out token by token when the header uses ``_HEADER_VOCABULARY``, so
-    that ``struct  s:base_s`` normalises to ``struct s : base_s``. Anything
-    outside that vocabulary -- a template parameter list, or a comment sitting
+    Written out token by token when the header uses *vocabulary*, so that
+    ``struct  s:base_s`` normalises to ``struct s : base_s``. Anything outside
+    that vocabulary -- a template parameter list, or a comment sitting
     mid-header -- is reproduced as the author wrote it, with only the gap
     before ``{`` normalised (``Site.BRACE_OPEN``). That was the whole of this
     function before ``P3-2b`` and it remains the fallback, so a header the
     emitter declines is no worse off than it was.
+
+    *vocabulary* and *sites* exist for ``P3-6``. An activity block's header is
+    a keyword and a brace -- ``parallel {`` -- and a ``repeat (4) {`` header
+    additionally holds an expression, whose ``(`` is a *control* paren rather
+    than the call or grouping paren an expression's own parens would be. Both
+    are decided the way every header is decided here; they simply cannot be
+    decided by the *declaration* vocabulary, which is closed and whose
+    closure is load-bearing (see :data:`_HEADER_VOCABULARY` on ``TOK_COLON``).
+    Passing the vocabulary in keeps that closure per-caller instead of
+    widening one shared set until nothing in it is unambiguous any more.
     """
     trivia = ctx.trivia
     span = code_span(trivia, node)
@@ -554,7 +603,9 @@ def _header(ctx: Any, node: Any, open_child: Any) -> Layout:
         return text("{")
     first = span[0]
 
-    emitted = emit_span(ctx, first, brace_pos, _HEADER_VOCABULARY)
+    emitted = emit_span(ctx, first, brace_pos,
+                        _HEADER_VOCABULARY if vocabulary is None else vocabulary,
+                        sites_at={} if sites is None else sites)
     if emitted is not None:
         return emitted
 
@@ -574,15 +625,20 @@ def _header(ctx: Any, node: Any, open_child: Any) -> Layout:
 
 
 def _block(ctx: Any, node: Any, construct: Construct,
-           body: Any = None) -> Layout:
+           body: Any = None, vocabulary: Any = None, sites: Any = None) \
+        -> Layout:
     """A braced declaration: header, indented members, closing brace.
 
     *body* is the node holding the braces, where that is not *node* itself.
     A constraint is the case that needs it: ``constraint_declaration`` is
     ``'constraint' identifier constraint_block``, so the name is one node's
     and the braces are its child's, while the header still runs from the
-    keyword to the ``{`` across both. Everything else here works in *code
-    positions* already, so this is the only seam that had to open.
+    keyword to the ``{`` across both. ``P3-6``'s ``repeat (4) { … }`` is the
+    same shape for the same reason -- the braces belong to the sequence block
+    the ``repeat`` wraps. Everything else here works in *code positions*
+    already, so this is the only seam that had to open.
+
+    *vocabulary* and *sites* are passed through to :func:`_header`.
     """
     body = node if body is None else body
     braces = _braces(body)
@@ -594,7 +650,7 @@ def _block(ctx: Any, node: Any, construct: Construct,
     if members is None:
         return _reproduce(ctx, node)
 
-    header = _header(ctx, node, body.children[open_at])
+    header = _header(ctx, node, body.children[open_at], vocabulary, sites)
     if not members:
         return concat([header, text("}")])
 
@@ -682,4 +738,23 @@ def register(registry) -> None:
     @registry.rule("struct_declaration")
     def _struct(ctx, node):
         return _block(ctx, node, _struct_construct(node))
+
+    @registry.rule("extend_stmt")
+    def _extend(ctx, node):
+        """``extend component spi_c { … }`` -- a body like any other.
+
+        Added in ``P3-6`` rather than in ``P3-2`` with the other declaration
+        bodies, where it belonged: it was simply missed, and ``PLAN.md`` has
+        no item for it. What made the omission visible is that ``extend``
+        gates far more than itself. 31 of the corpus's 92 files open one, and
+        a rule cannot lay out a node whose parent has none -- so every action,
+        field, constraint and activity inside those 31 files was being
+        reproduced no matter how many rules had been written for it. Before
+        this, *zero* of the corpus's ten activity binds were reachable.
+
+        One ``Construct`` for all five spellings, unlike ``struct``: the kind
+        keyword names the type being extended rather than a different kind of
+        body, and all 32 corpus instances indent identically.
+        """
+        return _block(ctx, node, Construct.EXTEND_BODY)
 

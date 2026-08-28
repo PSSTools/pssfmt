@@ -242,6 +242,7 @@ def format_source(src: Any,
 # a module that binds builders merely by being imported makes the shipped
 # formatter's contents depend on import order, which is the sort of thing that
 # is fine until the day it is not.
+from . import activities  # noqa: E402
 from . import constraints  # noqa: E402
 from . import decls  # noqa: E402
 from . import stmts  # noqa: E402
@@ -249,3 +250,4 @@ from . import stmts  # noqa: E402
 decls.register(REGISTRY)
 stmts.register(REGISTRY)
 constraints.register(REGISTRY)
+activities.register(REGISTRY)
