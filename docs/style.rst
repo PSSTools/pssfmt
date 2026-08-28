@@ -203,14 +203,101 @@ Spaced -- exactly one space
    is the base rule; ``infer`` alignment is what pads it. The same is true of
    the ten case-item exceptions below. Nothing in the corpus omits the space.
 
-The ``(`` rule is worth stating explicitly because it is two rules that look
-like one: **a space after a control keyword, none after a callee.**
+Parens: three constructs, three rules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``(`` rule is worth stating explicitly because it is three rules that
+look like one. The corpus's 65 expression parens split cleanly between them
+-- 40, 12 and 13 -- so this is a partition rather than a corner case.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 24 20 30
+
+   * - Construct
+     - Rule
+     - Evidence
+     - Example
+   * - Call
+     - tight against the callee, tight inside
+     - 241 / 244, 765 / 767
+     - ``write32(handle, value)``
+   * - Control keyword
+     - one space after the keyword
+     - 118 / 118
+     - ``if (x)``, ``foreach (i : list)``
+   * - Grouping and cast
+     - tight inside
+     - 12 / 12, 13 / 13
+     - ``(a + b) * c``, ``(bit[32])addr``
 
 .. code-block:: pss
 
    if (idx < limit) {
        write32(handle, value);
    }
+
+Grouping and casting share one rule because the corpus gives them one answer,
+across 14 files between them and with nothing writing either any other way.
+They are still a *separate* rule from the call, and the reason is worth being
+plain about: the numbers agreeing today does not make the decisions the same
+one. A house style that spaces a call's arguments has said nothing about
+whether ``(a + b)`` should become ``( a + b )``, and one setting answering
+both questions would be a coincidence hardened into an interface.
+
+A note on what is *not* decided here: **parentheses you wrote are kept, and
+parentheses you did not write are never added.** ``a + b * c`` does not
+become ``a + (b * c)``, however much clearer that might be, and ``(a) + b``
+keeps its redundant pair. Both would require ``pssfmt`` to reason about
+operator precedence, and a formatter that reasons about precedence is one
+that can be wrong about it.
+
+Brackets: four constructs, two rules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``[`` looks like the least controversial character in PSS, and three of its
+four uses are: they are tight, unanimously, across hundreds of instances. The
+fourth is not, and the split is worth knowing about because a declaration can
+contain both.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 20 22 30
+
+   * - Construct
+     - Rule
+     - Evidence
+     - Example
+   * - Index
+     - tight
+     - 1002 / 1002
+     - ``chans[i]``
+   * - Declarator dimension
+     - tight
+     - 34 / 34
+     - ``bit chan[4];``
+   * - Type width
+     - tight
+     - 333 / 333
+     - ``bit[64] addr;``
+   * - Set / domain
+     - one space before
+     - 14 / 16
+     - ``len in [1..4096]``
+
+.. code-block:: pss
+
+   rand bit[3] in [2..4] mode;
+
+Both brackets on that line come from the *same* grammar production, three
+characters apart. Nothing about the token or the node distinguishes them --
+only their position relative to ``in`` -- which is why ``pssfmt`` decides it
+from the parse tree rather than from the character.
+
+The set bracket is the weakest rule on this page at 14 / 16, and the two
+dissenters are worth naming rather than rounding away: they are two files
+writing ``in[1..4]`` against eleven writing ``in [1..4]``. Range operators
+inside the brackets are tight either way -- ``1..4096``, 18 / 18.
 
 Colons: four constructs, four rules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -361,6 +448,21 @@ aligned, and a global ``flush-left`` would destroy 21 hand-built tables.
 ``infer`` reproduces both exactly. Verible's precedent is what first
 suggested this default; the measurements are why it is kept.
 
+**Reproduces, not re-aligns**, and the distinction turned out to be the whole
+value of the mode. An obvious reading of "align a block the author aligned"
+is to recompute its columns to the tightest consistent position. That keeps a
+table a table, but it regularises away the columns the author chose -- and
+for a block whose cells are all the same width, which is what a table of
+constants usually is, the result is character-for-character what ``flush-left``
+would have produced. Measured over the corpus, that reading left 71 of 92
+files untouched against ``flush-left``'s 70. Reproducing the block instead
+leaves 78. A mode worth one file is not a mode.
+
+A block of **one** marked line is likewise reproduced. ``infer`` infers from a
+run; with a single line there is no run and therefore no conclusion, so
+collapsing its spacing would be a guess presented as a decision. One line is
+not a ragged block -- it is no evidence.
+
 Alignment runs *after* line breaking and can never affect a fit decision, and
 it is abandoned for a block that would push past ``print_width``.
 
@@ -403,6 +505,22 @@ rather than by evidence:
 
 * Bitwise ``&`` ``|`` ``^`` and shifts ``<<`` ``>>`` -- 14 instances total.
   Treated as binary operators, hence spaced.
+
+  Implication ``->`` used to be in this bullet and has been measured out of
+  it: on its own it is **6 / 6 spaced across 5 independent files**, which
+  agrees with the general rule it was being defaulted to. Stated separately
+  because "we defaulted it" and "we measured it" are different claims.
+
+  ``>>`` is a special case, and not for a reason about style: PSS has no
+  ``>>`` token, and the shift operator is two ``>`` that must be written
+  touching while the operator as a whole is spaced. That is not something a
+  per-token rule can express, so ``pssfmt`` leaves a right shift exactly as
+  you wrote it. One instance in the corpus.
+* Exponentiation ``**`` -- 65 instances, but all from a **single author**,
+  who writes ``a**2`` without spaces. Agreement within one voice is one
+  opinion counted 65 times, so it decides nothing; and the binary-operator
+  rule above would overrule the only evidence there is. ``pssfmt`` therefore
+  formats neither way and leaves ``**`` expressions alone.
 * The ternary ``? :`` -- not present.
 * Line-breaking policy for long constraint and activity bodies. That is
   the style-rule layer's work, and the layout engine derives it from

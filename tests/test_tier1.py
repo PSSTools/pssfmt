@@ -59,7 +59,13 @@ class TestBraces:
             assert fmt(spelling) == "component c {}\n"
 
     def test_one_space_before_the_brace(self):
-        assert fmt("component  c{}\n") == "component  c {}\n"
+        """``Site.BRACE_OPEN``.
+
+        The double space after ``component`` goes too, which it did not
+        before ``P3-2b``: the header is now written out token by token rather
+        than reproduced. See ``T-21`` for that half.
+        """
+        assert fmt("component  c{}\n") == "component c {}\n"
 
     def test_the_closing_brace_returns_to_the_construct_column(self):
         assert fmt("package p {\n    component c {\n        action a {}\n}\n}\n") == (

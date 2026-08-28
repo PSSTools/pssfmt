@@ -58,7 +58,30 @@ REFORMATTED = {
     "language-ref/activity_shapes.pss",
     "language-ref/behavioral_coverage.pss",
     "language-ref/coverage.pss",
+    # The fourth kind, added by ``P3-5``, and the only entry here that is a
+    # second-order effect rather than a direct one::
+    #
+    #     rand T   payload;
+    #     rand int in [1..N] count;
+    #
+    # The author padded ``T`` to the width of ``int``. Until ``P3-5`` the
+    # second line declined -- ``in`` was not in any vocabulary -- so the first
+    # was a *lone* marked line, which ``infer`` reproduces because one line is
+    # no evidence. Formatting the second line gives the group a second member,
+    # and by the column ``infer`` actually measures (the declarator: ``payload``
+    # at 9, ``count`` at 24) the two do not line up. So the block is ragged and
+    # is set flush left, which is what ``docs/style.rst`` says ``infer`` does.
+    #
+    # Recorded rather than worked around: what the author aligned is the *type*
+    # column, and inferring that from two lines of different shape is not
+    # something one instance can justify teaching the alignment pass.
+    "language-ref/extension_variants.pss",
     "language-ref/flow_basic.pss",
+    # ``P3-5``, and the only file constraints move at all -- the other 51
+    # constraint declarations in the corpus were already written the way the
+    # measurement says. See :data:`HOSTILE_BUT_VALID` below for why this one
+    # is formatted rather than declined.
+    "lexical/escaped_identifiers.pss",
     "stdlib/addr_reg_pkg.pss",
     "stdlib/executor_pkg.pss",
     "stdlib/std_pkg.pss",
@@ -128,6 +151,23 @@ def test_formatting_is_idempotent(path):
     assert format_source(once) == once
 
 
+#: The one file under ``lexical/`` or ``pathological/`` that is not malformed.
+#:
+#: It is *hostile* -- ``\\top-level_c``, ``\\busa+index``, escaped identifiers
+#: that swallow whatever follows them -- and it is also the only file in either
+#: directory the parser accepts with **zero** error nodes. So it is valid PSS,
+#: and from ``P3-5`` it contains a construct the formatter accounts for
+#: completely: ``constraint \\c1 { \\busa+index > 0; }``, which is opened out
+#: like the other 31 named constraint blocks in the corpus.
+#:
+#: Excluded here rather than the rule being narrowed, because the property this
+#: test defends is "decline what you cannot account for", not "never touch a
+#: file with a difficult name in it". What must still hold for it is checked
+#: below and is the part that matters: every token survives, and every escaped
+#: identifier survives character for character.
+HOSTILE_BUT_VALID = "lexical/escaped_identifiers.pss"
+
+
 @pytest.mark.parametrize("path", FILES, ids=ident)
 def test_broken_input_is_still_not_mangled(path):
     """Malformed input matters more here, not less.
@@ -140,10 +180,37 @@ def test_broken_input_is_still_not_mangled(path):
     src = read(path)
     result = format_safely(src, formatter=format_source)
     assert result.ok
+    if ident(path) == HOSTILE_BUT_VALID:
+        return
     if "pathological" in ident(path) or "lexical" in ident(path):
         assert result.text == src, (
             "%s was reformatted despite being deliberately malformed; Tier 1 "
             "is supposed to decline rather than guess" % ident(path))
+
+
+def test_the_hostile_file_keeps_every_escaped_identifier():
+    """What :data:`HOSTILE_BUT_VALID` gives up byte-identity for.
+
+    An escaped identifier runs to the next whitespace and swallows anything
+    printable on the way, so it is the construct a formatter is most likely to
+    damage while producing output that looks entirely reasonable. Checked as a
+    multiset so that a *moved* identifier still passes and a mangled, merged or
+    dropped one cannot.
+    """
+    from pssparser import cst as _cst
+
+    matching = [p for p in FILES if ident(p) == HOSTILE_BUT_VALID]
+    if not matching:
+        pytest.skip("%s not in this corpus" % HOSTILE_BUT_VALID)
+    src = read(matching[0])
+
+    def escaped(text):
+        return sorted(t.text for t in _cst.parse(text).tokens
+                      if t.type_name == "ESCAPED_ID")
+
+    before = escaped(src)
+    assert before, "the sample is supposed to be full of these"
+    assert escaped(format_source(src)) == before
 
 
 # ---------------------------------------------------------------------------

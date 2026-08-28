@@ -36,16 +36,36 @@ from pssfmt.trivia import TriviaMap  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
-#: Every construct the shipped rule set claims today (``P3-2``, Tier 1).
+#: Every construct the shipped rule set claims today (``P3-2``, ``P3-2b``).
 #: The wrapper rules the grammar puts between a body and its items are
 #: deliberately absent -- ``decls`` looks *through* them rather than
 #: registering them, so that one node owns each byte of trivia.
+#:
+#: ``import_function`` (``import target function read;``) is likewise absent:
+#: it is a different grammar rule from ``import_stmt`` and is reproduced as
+#: written. So is ``component_pool_declaration`` -- see ``rules/stmts.py`` on
+#: why ``pool [4]`` is not this module's spacing question to answer.
 SHIPPED = {
     "compilation_unit",
     "package_declaration",
     "component_declaration",
     "action_declaration",
     "struct_declaration",
+    "import_stmt",
+    # P3-3, field declarations
+    "attr_field",
+    "component_data_declaration",
+    "action_field_declaration",
+    "const_field_declaration",
+    "object_bind_stmt",
+    # P3-5, constraints. No `expression` entry: expressions are reached
+    # through the rules that contain them, never dispatched to on their own.
+    "constraint_declaration",
+    "expression_constraint_item",
+    "implication_constraint_item",
+    "soft_constraint_item",
+    "default_constraint",
+    "default_disable_constraint",
 }
 
 

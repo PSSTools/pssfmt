@@ -183,10 +183,14 @@ class Site(str, Enum):
     CALL_PAREN_CLOSE = "call_paren_close"
     CONTROL_PAREN_OPEN = "control_paren_open"
     CONTROL_PAREN_CLOSE = "control_paren_close"
+    GROUP_PAREN_OPEN = "group_paren_open"      # (a + b), (bit[32])x
+    GROUP_PAREN_CLOSE = "group_paren_close"
     INDEX_BRACKET_OPEN = "index_bracket_open"
     INDEX_BRACKET_CLOSE = "index_bracket_close"
     TYPE_BRACKET_OPEN = "type_bracket_open"
     TYPE_BRACKET_CLOSE = "type_bracket_close"
+    SET_BRACKET_OPEN = "set_bracket_open"      # in [1..4096]
+    SET_BRACKET_CLOSE = "set_bracket_close"
     BRACE_OPEN = "brace_open"
     BRACE_CLOSE = "brace_close"
 
@@ -300,10 +304,26 @@ DEFAULT_SPACING: Mapping[Site, Spacing] = MappingProxyType({
     # which is why these are separate sites rather than one.
     Site.CONTROL_PAREN_OPEN: Spacing(1, 0),      # 118/118
     Site.CONTROL_PAREN_CLOSE: Spacing(0, 0),
+    # `(a + b)` and `(bit[32])x` -- a third paren, and a third rule. The two
+    # constructs are one site because the corpus gives them one answer: tight
+    # inside, 12/12 grouping across 6 files and 13/13 cast across 10, with no
+    # file writing either any other way. Distinct from CALL_PAREN because the
+    # numbers agreeing today does not make the *decisions* the same one: a
+    # style that spaces a call's arguments has said nothing about whether
+    # `(a + b)` should become `( a + b )`.
+    Site.GROUP_PAREN_OPEN: Spacing(0, 0),        # 12/12 + 13/13
+    Site.GROUP_PAREN_CLOSE: Spacing(0, 0),       # 12/12 + 13/13
     Site.INDEX_BRACKET_OPEN: Spacing(0, 0),      # 1002/1002
     Site.INDEX_BRACKET_CLOSE: Spacing(0, 0),
     Site.TYPE_BRACKET_OPEN: Spacing(0, 0),       # 296/299
     Site.TYPE_BRACKET_CLOSE: Spacing(0, 0),
+    # `len in [1..4096]` -- the only bracket in PSS with a space before it,
+    # and the reason it is a separate site from the index and the width. Those
+    # two are 1002/1002 and 333/333 tight; this one is 14/16 spaced, and the
+    # same `[` character carries both rules within one declaration:
+    # `bit[3] in [2..4]`.
+    Site.SET_BRACKET_OPEN: Spacing(1, 0),        # 14/16, 11 files against 2
+    Site.SET_BRACKET_CLOSE: Spacing(0, 0),
     Site.BRACE_OPEN: Spacing(1, 0),              # before: 725/732
     Site.BRACE_CLOSE: Spacing(0, 0),
 

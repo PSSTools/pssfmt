@@ -103,13 +103,31 @@ class TestInfer:
         cols = {l.index("//") for l in got.split("\n")}
         assert len(cols) == 1, got
 
+    def test_an_aligned_block_comes_back_byte_for_byte(self):
+        """``infer`` reproduces a table; it does not re-align one.
+
+        The test above passes under either behaviour, because re-aligning to
+        the tightest consistent column also leaves the ``//`` in one column.
+        The difference is whether the author's *chosen* column survives, and
+        it is the whole value of the mode: re-aligning collapses a block of
+        equal-width cells to exactly what flush-left would produce, which over
+        the PSS corpus made ``infer`` worth one file more than flush-left.
+        """
+        assert align_text(ALIGNED, mode=AlignMode.INFER) == strip_marks(ALIGNED)
+
     def test_leaves_an_unaligned_block_flush_left(self):
         got = align_text(UNALIGNED, mode=AlignMode.INFER)
         assert got == align_text(UNALIGNED, mode=AlignMode.FLUSH_LEFT)
 
-    def test_a_single_marked_line_is_never_a_table(self):
+    def test_a_single_marked_line_is_left_exactly_as_written(self):
+        """One line is not a ragged block -- it is no evidence at all.
+
+        ``infer`` concludes from a *run*. With nothing to compare against
+        there is no conclusion to draw, so collapsing the author's padding
+        would be a guess wearing a decision's clothes. Reproduced instead.
+        """
         src = f"bit a;{M}      // lonely"
-        assert align_text(src, mode=AlignMode.INFER) == "bit a; // lonely"
+        assert align_text(src, mode=AlignMode.INFER) == "bit a;      // lonely"
 
     def test_equal_length_declarations_are_not_read_as_a_table(self):
         """Identical widths align by coincidence; that is not authorial intent.

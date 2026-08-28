@@ -4,10 +4,11 @@ Project status
 .. warning::
 
    **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
-   declarations and their bodies; everything else in a file is reproduced
-   exactly. This page says what is built, what is not, and in what order the
-   rest lands -- so that the gap is visible rather than inferred from a
-   command that does not work.
+   declarations, their bodies and headers, ``import`` statements, field
+   declarations, expressions and constraints; everything else in a file is
+   reproduced exactly. This page says what is built, what is not, and in what
+   order the rest lands -- so that the gap is visible rather than inferred
+   from a command that does not work.
 
 Built and tested
 ----------------
@@ -40,6 +41,95 @@ where the work went: a comment above a member moves with it, a trailing
 comment stays on its line, and a comment alone in an otherwise empty body --
 the one no member owns -- survives.
 
+**Spacing, on the constructs whose shape is settled.** Declaration headers
+and ``import`` statements are written out token by token, so ``struct
+s:base_s`` becomes ``struct s : base_s`` and the gap comes from the style
+rather than from the author. Two things are worth knowing about how that is
+bounded.
+
+First, each rule declares the tokens it expects, and **a token it does not
+recognise is a refusal, not a guess**. There is no global table mapping a
+character to a spacing rule, because the same character is not the same rule
+everywhere: ``*`` is multiplication in an expression and a wildcard in
+``import pkg::*``, and a table that had to choose would space the wildcard.
+The effect is that this machinery cannot mis-format a construct it was not
+written for -- it can only decline, which leaves your text as you wrote it.
+Headers with a template parameter list are declined today for exactly this
+reason.
+
+Second, a style can set any gap to zero, and that must never change what a
+file *means*. It cannot: a lexical floor sits under every computed gap.
+Escaped identifiers are the case that forces it -- ``\name`` runs to the next
+whitespace and swallows whatever follows, so ``\name{`` is a single token,
+and a zero gap before ``{`` would turn a declaration into an identifier with
+nothing else in the file looking wrong.
+
+**Field declarations.** ``rand bit[64] addr;``, ``mem_c::fill_a f;``,
+``static const bit[64] BASE = 0x40;`` -- the most common statement in PSS, and
+506 of the members inside the bodies described above.
+
+**Expressions.** ``(a + b) * c``, ``f(handle, -1)``, ``(bit[32])xfer.src`` --
+1300 of the corpus's 1383, with the rest declined for reasons given below.
+Most of them are inside constraints and activities, which have no rule yet,
+so what you see change today is mainly field defaults; the machinery is what
+those later rules will use.
+
+Two things about expressions are worth stating because they are the parts
+most likely to surprise.
+
+First, **parentheses you wrote are kept and parentheses you did not write are
+never added**. ``a + b * c`` stays as it is. A formatter built on an abstract
+syntax tree does not have that choice -- the tree records only that the
+multiplication is the addition's operand, so the parens have to be
+reconstructed from a precedence table, and the output is right only if the
+table is. ``pssfmt`` reads a concrete tree in which ``(`` is a token, so
+there is no table and nothing to get wrong.
+
+Second, the spacing of an operator comes from the **grammar**, not from the
+character. ``-`` is subtraction 49 times in the corpus and negation 103
+times; a table keyed on the character has one entry and needs two answers,
+and the one it picks is wrong the other way round. So ``a - -1`` gets both
+gaps right, from one rule, because ``unary_op`` and ``add_sub_op`` are
+different rules in the PSS grammar. The same applies to ``(``, which is a
+call, a grouping and a cast in the same expression.
+
+What is declined: ``**`` (65 instances, but all one author's, unanimously
+tight, against a general rule that says spaced -- one voice cannot decide
+it); ``>>`` (spelled as two ``>`` tokens that must touch inside an operator
+that must not, which per-token spacing cannot express); aggregates and
+template arguments, which belong to rules not yet written.
+
+**Constraints.** ``constraint len in [1..4096];`` and ``constraint c { … }``
+-- both shapes of declaration, and 95 of the corpus's 102 constraint body
+items: plain expressions, implications ``a -> b``, ``soft`` and ``default``.
+
+A named constraint block is opened out even when it holds a single item,
+because that is what 31 of the 32 in the corpus do, 21 of them with exactly
+one item. A formatter that collapsed them would be rewriting a deliberate
+convention rather than tidying anything.
+
+The seven items left alone are ``if``/``else``, ``foreach``, ``unique``,
+``dist``, an implication whose right-hand side is a braced block, and two
+expressions already covered above. Each has **one instance in the corpus or
+none**, and each needs a decision the corpus has not made -- where ``else``
+goes relative to its brace, what the iterator colon in ``foreach (i : list)``
+looks like, whether a ``{a, b}`` list brace follows the rule measured on 725
+declaration bodies. One example cannot settle any of those.
+
+**Column alignment.** ``infer``: a block that was already aligned comes back
+exactly as written, and one that was not is set flush left. This is what makes
+the field rules safe to turn on -- without it they would flatten every
+hand-built table in the test corpus, which is a large, entirely plausible
+diff that destroys deliberate work.
+
+Two details are worth stating because they are decisions rather than
+accidents. ``infer`` *reproduces* an aligned block rather than re-aligning it
+to the tightest consistent column: re-aligning keeps a table a table but
+regularises the author's chosen columns away, and for a block of equal-width
+cells -- a table of constants -- it is indistinguishable from no alignment at
+all. And a lone line is reproduced rather than flattened, because one line is
+not a ragged block; it is no evidence, and there is nothing to infer from.
+
 **The style policy.** Those measurements now exist as values a rule can ask
 for, per construct, rather than as numbers a rule would otherwise write
 inline. That matters less for what ``pssfmt`` does today than for what it can
@@ -58,9 +148,12 @@ Not built yet
    * - Piece
      - What is missing
    * - **Style rules**
-     - Most of them. Declarations and their bodies are formatted; statements,
-       expressions, constraints, activities and coverage are not, and are
-       reproduced exactly until they are.
+     - Most of them. Declarations, their bodies and their headers are
+       formatted, as are ``import`` statements, field declarations,
+       expressions and constraints; other statements, activities, coverage and
+       template parameter lists are not, and are reproduced exactly until
+       they are. Expressions *inside* those constructs are reproduced with
+       them: a rule cannot lay out a node whose parent has no rule.
    * - **Command line**
      - ``pssfmt -i``, ``--check``, ``--diff``, ``--lines``. See
        :doc:`quickstart` for the intended interface.

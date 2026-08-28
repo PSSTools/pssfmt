@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
-from ..layout import Layout, Verbatim, render
+from ..layout import Layout, Verbatim, align_text, render
 from ..style import DEFAULT_STYLE, Style
 from ..trivia import TriviaMap
 from .emit import code_span, span_text
@@ -199,6 +199,16 @@ def build_tree(tree: Any,
         use_tabs=style.use_tabs,
         tab_width=style.indent_width,
     )
+    # Column alignment runs on finished lines, after line breaking, so it can
+    # never influence a fit decision -- see ``pssfmt.layout.align``. It is a
+    # no-op on text containing no column stop, which is every construct whose
+    # rule does not ask for one.
+    text = align_text(
+        text,
+        mode=style.alignment,
+        boundary=style.alignment_group_boundary,
+        print_width=style.print_width,
+    )
     # Trivia after the last code token belongs to no node, so no builder can
     # emit it. Dropping it truncates the file -- usually by exactly the final
     # newline, which is the kind of diff that gets committed without comment.
@@ -232,6 +242,10 @@ def format_source(src: Any,
 # a module that binds builders merely by being imported makes the shipped
 # formatter's contents depend on import order, which is the sort of thing that
 # is fine until the day it is not.
+from . import constraints  # noqa: E402
 from . import decls  # noqa: E402
+from . import stmts  # noqa: E402
 
 decls.register(REGISTRY)
+stmts.register(REGISTRY)
+constraints.register(REGISTRY)

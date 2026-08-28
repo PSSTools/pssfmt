@@ -54,7 +54,7 @@ from __future__ import annotations
 
 from typing import Any, List, NamedTuple, Optional, Tuple
 
-from ..layout import Layout, concat, indent, text
+from ..layout import ALIGN_MARK, Layout, concat, indent, text
 from ..style import Construct, Site
 from .emit import (
     code_span,
@@ -63,6 +63,7 @@ from .emit import (
     span_text,
     span_tokens,
 )
+from .tokens import WORD, emit_span
 
 #: ``struct_kind`` covers five spellings that lay out the same way but are
 #: separate members of :class:`~pssfmt.style.Construct`, so a house style can
@@ -95,7 +96,78 @@ _PASSTHROUGH = (
     "action_body_item_ann",
     "action_body_item",
     "struct_body_item",
+    # ``P3-5``. ``constraint_body_item`` wraps every item in a constraint
+    # block, and ``constraint_set`` wraps the single item of an anonymous
+    # ``constraint e;`` -- both are one-child rules with nothing of their own
+    # to say, exactly like the body-item wrappers above.
+    "constraint_body_item",
+    "constraint_set",
+    "default_constraint_item",
 )
+
+
+#: What a declaration header may contain for this module to write it out
+#: token by token (``P3-2b``). A closed set, and closed at the point the
+#: evidence stops being uniform: 225 of the corpus's 356 headers use exactly
+#: this vocabulary, in 16 shapes, none of them wrapped across lines and none
+#: containing a comment.
+#:
+#: The other 131 have a **template parameter list** -- ``component c<struct
+#: TRAIT : addr_trait_s = empty_addr_trait_s>`` -- which brings ``<``, ``>``,
+#: ``,``, ``=`` and a nested default-value expression, is where all nine
+#: multi-line headers and the one interior comment live, and is a list that
+#: may need to break rather than a run of tokens that fits. That is a rule
+#: about parameter lists, and it is ``P3-7``'s (§7.1 tier 3). Until then a
+#: templated header is reproduced as the author wrote it, which is what
+#: happened before this vocabulary existed.
+#:
+#: ``TOK_COLON`` maps to inheritance unconditionally, which is safe only
+#: *because* the set is closed: a bit-slice colon needs ``[``, and a case-item
+#: colon needs a case, and neither can occur in a span made of these tokens.
+_HEADER_VOCABULARY = {
+    "TOK_PACKAGE": WORD,
+    "TOK_COMPONENT": WORD,
+    "TOK_ACTION": WORD,
+    "TOK_STRUCT": WORD,
+    "TOK_BUFFER": WORD,
+    "TOK_STREAM": WORD,
+    "TOK_STATE": WORD,
+    "TOK_RESOURCE": WORD,
+    "TOK_PURE": WORD,
+    # ``constraint c {`` and ``dynamic constraint c {`` (``P3-5``). Word-class
+    # keywords with no second reading, and they cannot make the colon
+    # ambiguous either: a constraint header has no inheritance clause, so the
+    # only ``:`` reachable in a span of these tokens is still that one.
+    "TOK_CONSTRAINT": WORD,
+    "TOK_DYNAMIC": WORD,
+    "ID": WORD,
+    "ESCAPED_ID": WORD,
+    "TOK_COLON": Site.COLON_INHERITANCE,
+    "TOK_LCBRACE": Site.BRACE_OPEN,
+}
+
+#: ``import pkg::*;`` -- all 147 imports in the corpus, and the same shape
+#: every time.
+#:
+#: ``*`` is deliberately **not** a site. In an expression it is
+#: ``Site.MULTIPLICATIVE`` and spaced; here it is a wildcard, and the gaps on
+#: both sides of it are already decided by its neighbours --
+#: ``Site.SCOPE_RESOLUTION`` is tight and ``Site.SEMICOLON`` is tight. Giving
+#: it a site of its own would mean inventing a default no measurement
+#: supports; giving it the expression site would emit ``import pkg:: * ;``.
+#: Contributing nothing is both correct and the only option backed by
+#: evidence.
+#:
+#: ``import target function read;`` is a different grammar rule
+#: (``import_function``) and is not handled here.
+_IMPORT_VOCABULARY = {
+    "TOK_IMPORT": WORD,
+    "ID": WORD,
+    "ESCAPED_ID": WORD,
+    "TOK_DOUBLE_COLON": Site.SCOPE_RESOLUTION,
+    "TOK_ASTERISK": WORD,
+    "TOK_SEMICOLON": Site.SEMICOLON,
+}
 
 
 #: Returned where ``None`` already means "there is none": tells the caller to
@@ -215,16 +287,26 @@ def _leading(ctx: Any, token_index: int) -> Optional[_Leading]:
 def _trailing(ctx: Any, token_index: int) -> Optional[Layout]:
     """A same-line comment hanging off *token_index*, if there is one.
 
-    Emitted with the original gap before it. That gap is what ``infer``
-    alignment would preserve for a hand-aligned block and what it would leave
-    alone for a ragged one, so reproducing it is the right answer under both
-    -- until the alignment pass runs here, which is ``P2-8``'s work.
+    Emitted behind a **column stop**, with the author's own gap after it. This
+    is the run ``docs/style.rst`` measured most sharply: hand-written code
+    aligns its trailing comments in every run of three or more, and generated
+    code never does. ``infer`` tells them apart, but only if the original
+    spacing reaches it -- so the gap carried here is the author's, not a
+    computed one, and :mod:`pssfmt.layout.align` decides what becomes of it.
     """
     run = ctx.trivia.of(token_index).raw_trailing
     if not any(tok.is_comment for tok in run):
         return None if _only_whitespace(run) else _BAIL
     body = "".join(tok.text for tok in run).rstrip()
-    return text(body) if "\n" not in body else _BAIL
+    if "\n" in body:
+        return _BAIL
+    stripped = body.lstrip(" \t")
+    gap = len(body) - len(stripped)
+    if "\t" in body[:gap]:
+        # Re-anchoring a tab means guessing a tab width, which is a display
+        # setting rather than a fact about the file. Reproduced as written.
+        return text(body)
+    return text(ALIGN_MARK + " " * max(gap, 1) + stripped)
 
 
 def _effective(node: Any) -> Any:
@@ -457,11 +539,13 @@ def _members_of(ctx: Any, node: Any, open_at: int, close_at: int) \
 def _header(ctx: Any, node: Any, open_child: Any) -> Layout:
     """Everything up to and including ``{``.
 
-    Reproduced as written, except the whitespace immediately before the brace,
-    which is a style decision (``Site.BRACE_OPEN``). If a comment sits in that
-    gap -- ``component c /* why */ {`` -- the whole run is reproduced instead:
-    normalising around a comment means deciding where the comment goes, and
-    this module has no opinion there worth acting on.
+    Written out token by token when the header uses ``_HEADER_VOCABULARY``, so
+    that ``struct  s:base_s`` normalises to ``struct s : base_s``. Anything
+    outside that vocabulary -- a template parameter list, or a comment sitting
+    mid-header -- is reproduced as the author wrote it, with only the gap
+    before ``{`` normalised (``Site.BRACE_OPEN``). That was the whole of this
+    function before ``P3-2b`` and it remains the fallback, so a header the
+    emitter declines is no worse off than it was.
     """
     trivia = ctx.trivia
     span = code_span(trivia, node)
@@ -469,6 +553,11 @@ def _header(ctx: Any, node: Any, open_child: Any) -> Layout:
     if span is None or brace_pos <= span[0]:
         return text("{")
     first = span[0]
+
+    emitted = emit_span(ctx, first, brace_pos, _HEADER_VOCABULARY)
+    if emitted is not None:
+        return emitted
+
     origin = trivia.of(trivia.code_indices[first]).token.col
 
     brace_lead = trivia.of(open_child.token_index).raw_leading
@@ -484,22 +573,32 @@ def _header(ctx: Any, node: Any, open_child: Any) -> Layout:
     return concat([reindented_layout(tokens, head, origin), text(gap + "{")])
 
 
-def _block(ctx: Any, node: Any, construct: Construct) -> Layout:
-    """A braced declaration: header, indented members, closing brace."""
-    braces = _braces(node)
+def _block(ctx: Any, node: Any, construct: Construct,
+           body: Any = None) -> Layout:
+    """A braced declaration: header, indented members, closing brace.
+
+    *body* is the node holding the braces, where that is not *node* itself.
+    A constraint is the case that needs it: ``constraint_declaration`` is
+    ``'constraint' identifier constraint_block``, so the name is one node's
+    and the braces are its child's, while the header still runs from the
+    keyword to the ``{`` across both. Everything else here works in *code
+    positions* already, so this is the only seam that had to open.
+    """
+    body = node if body is None else body
+    braces = _braces(body)
     if braces is None:
         return _reproduce(ctx, node)
     open_at, close_at = braces
 
-    members = _members_of(ctx, node, open_at, close_at)
+    members = _members_of(ctx, body, open_at, close_at)
     if members is None:
         return _reproduce(ctx, node)
 
-    header = _header(ctx, node, node.children[open_at])
+    header = _header(ctx, node, body.children[open_at])
     if not members:
         return concat([header, text("}")])
 
-    close_token = ctx.trivia.of(node.children[close_at].token_index).token
+    close_token = ctx.trivia.of(body.children[close_at].token_index).token
     blanks = _blank_lines_before(ctx, close_token)
 
     return concat([
@@ -552,6 +651,21 @@ def register(registry) -> None:
             # node emitted the file's leading trivia, and nothing else will.
             return ctx.verbatim(node)
         return _stack(ctx, members, lead_break=False)
+
+    @registry.rule("import_stmt")
+    def _import(ctx, node):
+        """``import pkg::*;`` -- the first statement written out as tokens.
+
+        Small enough to be uncontroversial and uniform enough to be safe: one
+        shape, 147 times, no comments and no line breaks anywhere in the
+        corpus. It is here to make the token path carry a real construct
+        before ``P3-3`` points it at statements that vary.
+        """
+        span = code_span(ctx.trivia, node)
+        if span is None:
+            return _reproduce(ctx, node)
+        emitted = emit_span(ctx, span[0], span[1], _IMPORT_VOCABULARY)
+        return emitted if emitted is not None else _reproduce(ctx, node)
 
     @registry.rule("package_declaration")
     def _package(ctx, node):

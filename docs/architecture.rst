@@ -92,6 +92,44 @@ The layer boundaries
 ``src/pssfmt/style.py``
     The seam between the two. The one module that knows a default.
 
+A rule that writes tokens out, rather than moving the author's text around,
+declares the token types it expects and **declines anything else**. That is
+worth stating as an architectural rule and not an implementation detail,
+because it is what bounds the blast radius of a rule set that will be
+incomplete for a long time: there is no global mapping from a character to a
+spacing decision, so a rule cannot quietly mis-format a construct nobody
+wrote it for. The same character is genuinely different rules in different
+places -- ``*`` is multiplication in an expression and a wildcard in
+``import pkg::*`` -- and a table that had to choose between them would be
+wrong somewhere by construction.
+
+Declaring the token types is necessary and it is not sufficient, because some
+tokens have no answer *at that granularity*. ``-`` is unary or binary and
+``(`` is a call, a grouping or a cast, and a map keyed on the token type has
+one slot for each. The rule is that where a token's meaning is a fact about
+the **tree**, the site comes from the tree: the PSS grammar already names
+``unary_op`` and ``add_sub_op`` separately, so a rule that has walked the
+parse hands the emitter a per-token answer rather than letting it infer one.
+The emitter still never guesses -- what changes is only who is asked.
+
+A rule doing that owes itself a completeness check, and the reason is a
+general one worth carrying to the next such case. Falling back to the token
+type for a position the walk missed is *worse* than declining: an ambiguous
+type's entry is a placeholder, so the output is wrong rather than absent, and
+nothing about it says so. Any token type whose site comes from the tree is
+therefore enumerated, and an unclassified one refuses the whole span.
+
+Underneath every spacing decision sits a floor the style cannot lower: two
+tokens must never be emitted in a way that lexes as one. That is a question
+about the lexer rather than about taste, and it is kept separate from the
+style for that reason. It is also the one place where a closed vocabulary
+stopped being enough: as long as no rule emitted operators, no two tokens in
+any vocabulary could merge, and the floor only had to know about identifiers.
+Expressions ended that -- ``a & &b`` written tight is ``a && b``, a different
+program that parses -- so the floor is now maximal munch stated directly, and
+it is verified against the real lexer over every ordered pair of lexemes
+rather than against a hand-written list of hazards.
+
 That last boundary is worth being blunt about, because it is the one with a
 deadline. How many options ``pssfmt`` *exposes* is reversible at any time.
 Whether rules are *written against a style policy at all* is decided by the
