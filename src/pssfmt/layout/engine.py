@@ -42,7 +42,7 @@ from .ir import (
     Text,
     Verbatim,
 )
-from .width import width_of
+from .width import expand_tabs, width_of
 
 __all__ = ["render", "propagate_breaks", "MODE_BREAK", "MODE_FLAT"]
 
@@ -304,10 +304,16 @@ def render(
 
         elif isinstance(node, Verbatim):
             out.append(node.value)
+            # Measured through ``expand_tabs`` because a ``Verbatim`` holds the
+            # author's bytes rather than anything a rule composed, and those
+            # may contain a tab. ``width_of`` rejects one on sight, which is
+            # right for ``Text`` and would here only mean raising out of
+            # ``render`` and handing the whole file back unformatted.
             if "\n" in node.value:
-                pos = width_of(node.value.rsplit("\n", 1)[1])
+                tail = node.value.rsplit("\n", 1)[1]
+                pos = width_of(expand_tabs(tail, 0, tab_width))
             else:
-                pos += width_of(node.value)
+                pos += width_of(expand_tabs(node.value, pos, tab_width))
 
         elif isinstance(node, Group):
             is_broken = broken.get(id(node), False)

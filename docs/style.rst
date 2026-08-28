@@ -299,6 +299,47 @@ dissenters are worth naming rather than rounding away: they are two files
 writing ``in[1..4]`` against eleven writing ``in [1..4]``. Range operators
 inside the brackets are tight either way -- ``1..4096``, 18 / 18.
 
+Angle brackets: one character, two opposite rules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``<`` is the sharpest case on this page, because its two readings do not
+merely differ -- they disagree.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 20 22 30
+
+   * - Construct
+     - Rule
+     - Evidence
+     - Example
+   * - Template arguments
+     - tight inside
+     - 137 / 137
+     - ``packed_s<bit, 32>``
+   * - Comparison
+     - one space each side
+     - 128 / 130
+     - ``a < b``
+
+Same character, same token type, and no single answer that is not wrong about
+half the language. So the rule is decided from the parse tree, exactly as the
+``[`` case above is, and a style can move one without moving the other.
+
+The template rule is the most unanimous measurement on this page: every one of
+the 137 argument lists in the corpus, across 34 files, writes both ends tight.
+The type meets its own argument list tightly too, 135 / 137 -- two instances
+in one file write ``foo <T>``. Arguments are separated the way arguments are
+separated everywhere, one space after the comma, 122 / 127.
+
+**Template parameter *declarations* are a different construct**, and this page
+does not decide them. ``struct base_s <struct TRAIT : addr_trait_s =
+empty_addr_trait_s>`` is 16 instances in 5 files, and they do not agree: 7 of
+16 are tight after the ``<``, because 5 of the rest put the parameter on a
+line of its own. A parameter also carries a ``:`` that is a *bound* rather
+than inheritance, which the next section would have to grow a fifth rule for.
+``pssfmt`` leaves them exactly as written.
+
 Colons: four constructs, four rules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -475,6 +516,77 @@ not a ragged block -- it is no evidence.
 Alignment runs *after* line breaking and can never affect a fit decision, and
 it is abandoned for a block that would push past ``print_width``.
 
+Switching it off
+----------------
+
+Every rule on this page can be overruled, by you, in the file. Three
+directives do it:
+
+.. code-block:: pss
+
+   // pssfmt off
+   struct hand_aligned_regs {
+       bit[8]  cmd;    bit[16] addr;
+       bit[8]  status; bit[16] mask;
+   }
+   // pssfmt on
+
+   // pssfmt ignore
+   struct just_this_one { bit[8]  a;   bit[8]  b; }
+
+Everything between ``off`` and ``on`` comes back **byte for byte** --
+including the blank lines inside it, which are otherwise clamped, and
+including trailing whitespace and tabs, which are otherwise removed.
+``ignore`` does the same for the single construct that follows it, whatever
+size that construct is.
+
+This is deliberately not a lint suppression. There is no rule name to
+name and no diagnostic to silence: the region is copied, not exempted, so
+the tool has no opinion about it at all.
+
+Both comment syntaxes work, since ``/* pssfmt off */`` is the only spelling
+available mid-line. A directive takes effect **where it is written**: an
+own-line comment applies from the construct below it, and a comment at the
+end of a line applies from the next one, so ``} // pssfmt off`` still
+formats the thing it is written on.
+
+The match is exact
+~~~~~~~~~~~~~~~~~~
+
+``pssfmt off`` is a directive only when it is the *whole* comment.
+``// we should turn pssfmt off for this table`` is prose about the tool, and
+reading it as an instruction would silently stop formatting the rest of the
+file. Prose mentioning a formatter is much more common than directives are,
+so the loose match is the one that is wrong on the common case.
+
+The cost is that a near miss -- ``// pssfmt: off``, ``// pssfmt off!`` --
+is an ordinary comment, silently. That is the safer side to be wrong on, but
+it is still a wrong side, and reporting unrecognised ``pssfmt`` comments is
+on the list for when there is a diagnostics channel to report them on.
+
+When the directives do not pair up
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Directives are written by hand, usually in a hurry, so the malformed cases
+are the normal cases and each has a decided answer:
+
+``off`` with no ``on``
+    Protects to the end of the file. Treating it as unmatched would reformat
+    precisely the region someone was trying to protect.
+``on`` with no ``off``
+    Does nothing. There is nothing to close.
+``off`` inside an ``off``
+    They do not nest; the first ``on`` closes the region. Counting depth
+    would turn one forgotten ``on`` into a file that is silently never
+    formatted again -- the same failure as the unmatched case, but invisible
+    instead of visible.
+
+One thing is not byte-exact, and it is the region's **first line**. The
+enclosing block writes an indent before every member and a copied region
+cannot refuse it, so under a changed ``indent_width`` the first line moves
+and the rest keep the columns you gave them. That is what keeps the table a
+table; the raggedness at the top edge is the price.
+
 What ``pssfmt`` will never do
 -----------------------------
 
@@ -498,6 +610,24 @@ not try.
 template is foreign text -- C, SystemVerilog, whatever the target consumes --
 and PSS is merely carrying it. It is emitted byte for byte, exempt from width
 accounting, and it forces its enclosing group to break.
+
+That commitment outranks every rule on this page, and it is worth being
+explicit about what that costs, because the two collide in practice.
+
+*The unanimous properties stop at the edge of a copied region.* No trailing
+whitespace, no tab indentation, no brace alone on a line: each was measured
+over PSS that people wrote and each is a claim about a gap ``pssfmt`` chose.
+A target template's interior has no such gaps -- every character came out of
+one token -- so a tab or a trailing space inside one is not a violation, and
+removing it would be editing a program in another language. The same holds
+inside a ``pssfmt off`` region, for the same reason arrived at from the other
+direction: there the gaps are ones ``pssfmt`` was told not to choose.
+
+*A file holding a target template cannot be fully re-indented.* Change
+``indent_width`` and the ``exec body C = """`` line moves with its siblings
+while the interior and the closing ``"""`` do not, because those columns are
+inside the string and are part of its value. The output is ragged and stable.
+Making it tidy would mean changing what the tool generates.
 
 **It will not change the tokens.** Output re-lexes to the same token
 sequence as the input: same types, same text. If it would not, ``pssfmt``

@@ -36,8 +36,11 @@ import pytest
 pytest.importorskip("pssparser")
 
 from pssfmt.rules import REGISTRY, format_source  # noqa: E402
+from pssfmt.verbatim import verbatim_lines  # noqa: E402
 from pssfmt.verify import format_safely  # noqa: E402
-from support import CORPUS_ROOT, CORPUS_SOURCE, corpus_files  # noqa: E402
+from support import (CORPUS_ROOT, CORPUS_SOURCE, corpus_files,  # noqa: E402
+                     lone_brace_offenders, tab_indent_offenders,
+                     trailing_whitespace_offenders)
 
 pytestmark = [pytest.mark.corpus, pytest.mark.integration]
 
@@ -75,6 +78,19 @@ REFORMATTED = {
     # Recorded rather than worked around: what the author aligned is the *type*
     # column, and inferring that from two lines of different shape is not
     # something one instance can justify teaching the alignment pass.
+    #
+    # ``P3-7`` added a *second* instance of exactly that shape to this file,
+    # for exactly the same reason one item later::
+    #
+    #     wrapper_s<>               w_default;   // <> required
+    #     wrapper_s<base_payload_s, 8> w_eight;
+    #
+    # Until templates were formatted the first line declined and kept its
+    # padding. Both are formatted now, and the declarators sit at columns 30
+    # and 33 -- the author padded towards a column without reaching one, which
+    # is the case ``infer`` is specifically built not to honour. A genuine
+    # table survives; ``T-26`` pins both directions so this stays a
+    # measurement rather than an anecdote.
     "language-ref/extension_variants.pss",
     "language-ref/flow_basic.pss",
     # ``P3-5``, and the only file constraints move at all -- the other 51
@@ -82,6 +98,21 @@ REFORMATTED = {
     # measurement says. See :data:`HOSTILE_BUT_VALID` below for why this one
     # is formatted rather than declined.
     "lexical/escaped_identifiers.pss",
+    # ``P3-7``, and the only file templates move at all: the other 33 of the
+    # 34 files holding a template argument list are byte-identical after being
+    # formatted for the first time. That is the real result of the item -- 137
+    # argument lists newly written out by the formatter rather than copied,
+    # and 33 files' worth of agreement that ``<`` and ``>`` are tight.
+    #
+    # What moves here is one gap, and it is the same near-miss as
+    # ``extension_variants.pss`` above::
+    #
+    #     scalar_regs_c regs;
+    #     transparent_addr_space_c<>  sys_mem;
+    #
+    # Two spaces where the neighbouring field has one, and the two declarators
+    # are 13 columns apart, so there is no column to keep.
+    "peakrdl/scalar_regs__base_address_top.pss",
     "stdlib/addr_reg_pkg.pss",
     "stdlib/executor_pkg.pss",
     "stdlib/std_pkg.pss",
@@ -216,13 +247,24 @@ def test_the_hostile_file_keeps_every_escaped_identifier():
 # ---------------------------------------------------------------------------
 # The style the output must now have, not merely preserve
 # ---------------------------------------------------------------------------
+#
+# All three ask about lines the formatter *composed*, and skip the ones it
+# copied. A target-template ``exec`` body is C or SystemVerilog carried inside
+# a string, emitted byte-for-byte by ``formatter.md`` section 4.3; a claim
+# about PSS style applied there is a claim about somebody else's language, and
+# the only way to satisfy it would be the corruption 4.3 forbids.
+#
+# No corpus file reaches that case today -- the one target template in the 92
+# is tidy -- which is exactly why the exemption is exercised by hand in
+# ``T-27`` instead. A gate that is green because its input never reaches the
+# case is the shape ``P3-6``'s ``extend`` came in.
 
 
 @pytest.mark.parametrize("path", FILES, ids=ident)
 def test_the_output_has_no_trailing_whitespace(path):
     """``docs/style.rst``: 0 of 4856 lines. Unanimous across every voice."""
-    offenders = [i for i, line in enumerate(format_source(read(path)).splitlines(), 1)
-                 if line != line.rstrip()]
+    out = format_source(read(path))
+    offenders = trailing_whitespace_offenders(out, verbatim_lines(out))
     assert not offenders, "%s: trailing whitespace on lines %s" % (
         ident(path), offenders[:10])
 
@@ -231,8 +273,7 @@ def test_the_output_has_no_trailing_whitespace(path):
 def test_the_output_never_indents_with_a_tab(path):
     """Also 0 of 4856, and ``use_tabs`` defaults to false."""
     out = format_source(read(path))
-    offenders = [i for i, line in enumerate(out.splitlines(), 1)
-                 if "\t" in line[:len(line) - len(line.lstrip())]]
+    offenders = tab_indent_offenders(out, verbatim_lines(out))
     assert not offenders, "%s: tab indentation on lines %s" % (
         ident(path), offenders[:10])
 
@@ -241,8 +282,8 @@ def test_the_output_never_indents_with_a_tab(path):
 def test_the_output_never_puts_a_brace_on_its_own_line(path):
     """K&R, 732 of 733. Allman does not occur in the corpus and must not be
     introduced by the formatter."""
-    offenders = [i for i, line in enumerate(format_source(read(path)).splitlines(), 1)
-                 if line.strip() == "{"]
+    out = format_source(read(path))
+    offenders = lone_brace_offenders(out, verbatim_lines(out))
     assert not offenders, "%s: lone opening brace on lines %s" % (
         ident(path), offenders[:10])
 

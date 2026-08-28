@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import unicodedata
 
-__all__ = ["width_of", "char_width"]
+__all__ = ["width_of", "char_width", "expand_tabs"]
 
 # Categories that occupy no column of their own.
 _ZERO_WIDTH_CATEGORIES = frozenset(("Mn", "Me", "Cf"))
@@ -91,3 +91,35 @@ def width_of(text: str) -> int:
             )
         return sum(1 for ch in text if ch >= " " and ch != "\x7f")
     return sum(char_width(ch) for ch in text)
+
+
+def expand_tabs(text: str, start_col: int = 0, tab_width: int = 4) -> str:
+    """*text* with each tab advanced to the next tab stop from *start_col*.
+
+    For measuring text the formatter did **not** compose. :func:`width_of`
+    refuses a tab outright, and that refusal is worth keeping: a ``Text`` node
+    is something a rule built, indentation is the engine's to emit, and a tab
+    arriving in composed text means a rule wrote one. There is no width that
+    answer should have.
+
+    A ``Verbatim`` node is the opposite case. It is the author's bytes, copied
+    because the formatter decided it was not entitled to move them -- a
+    declined construct, or the interior of a target-template ``exec`` body --
+    and those bytes may contain a tab for reasons that are none of the
+    engine's business. Refusing to measure one does not protect anything; it
+    just raises, and the fail-safe then returns the whole file unformatted.
+
+    Which is not hypothetical: before ``P3-8`` any tab-indented file holding a
+    multi-line declined construct did exactly that. The corpus could not show
+    it, because 0 of its 4856 lines begin with a tab.
+
+    *start_col* matters because a tab stop is absolute. ``"\\ta"`` measures 4
+    columns at the start of a line and 1 more column at column 3, and the
+    single-line ``Verbatim`` case starts wherever the line had got to.
+    """
+    if "\t" not in text:
+        return text
+    # Tab stops count from the start of the line, so shift the text to its
+    # real column, expand, and shift back. Spaces expand to themselves, which
+    # is what makes the round trip exact rather than approximate.
+    return (" " * start_col + text).expandtabs(tab_width)[start_col:]

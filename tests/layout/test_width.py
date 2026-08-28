@@ -13,7 +13,7 @@ import pytest
 
 from pssfmt.layout import render, text, width_of
 from pssfmt.layout.ir import concat, group, indent
-from pssfmt.layout.width import char_width
+from pssfmt.layout.width import char_width, expand_tabs
 
 pytestmark = [pytest.mark.layout, pytest.mark.unit]
 
@@ -75,3 +75,70 @@ def test_the_engine_breaks_on_columns_not_characters():
     wide = "你" * 6  # 6 characters, 12 columns
     doc = group(concat(text("["), indent(concat(text(wide),), 4), text("]")))
     assert width_of(render(doc, print_width=100)) == 14
+
+
+# ---------------------------------------------------------------------------
+# Tabs the formatter did not write (``P3-8``)
+# ---------------------------------------------------------------------------
+#
+# The refusal above is right for composed text and wrong for copied text, and
+# the two needed separating. A ``Verbatim`` node holds the author's bytes --
+# a declined construct, or the interior of a target-template ``exec`` body --
+# and those may contain a tab. Raising there does not prevent anything; it
+# aborts the render, and the fail-safe hands back the whole file unformatted.
+
+
+@pytest.mark.parametrize("text_in, start, expected", [
+    ("\ta", 0, "    a"),
+    ("\ta", 3, " a"),          # already at column 3; the stop is at 4
+    ("\ta", 4, "    a"),       # exactly on a stop; a full tab follows
+    ("a\tb", 0, "a   b"),
+    ("\t\ta", 0, "        a"),
+    ("ab", 0, "ab"),           # untouched, and returned as-is
+    ("", 0, ""),
+])
+def test_expand_tabs_advances_to_the_next_stop(text_in, start, expected):
+    assert expand_tabs(text_in, start, 4) == expected
+
+
+def test_expand_tabs_is_measurable_where_width_of_alone_is_not():
+    """The composition that is the whole point of the function."""
+    with pytest.raises(ValueError):
+        width_of("\tf();")
+    assert width_of(expand_tabs("\tf();", 0, 4)) == 8
+
+
+@pytest.mark.parametrize("src, why", [
+    ("package p {\n\tcovergroup cg {\n\t\tc : coverpoint x;\n\t}\n}\n",
+     "a tab-indented multi-line declined construct"),
+    ("package p {\n    covergroup cg {\n        c : coverpoint\tx;\n    }\n}\n",
+     "a tab in the middle of a one-line declined construct"),
+    ("component c {\n    compile if\t(P) { int x; }\n}\n",
+     "a tab inside `compile if`"),
+    ("package p {\n    @desc_c {.text\t= \"x\"}\n    struct s { int x; }\n}\n",
+     "a tab inside an annotation"),
+    ('component c {\n    action a {\n        exec body C = """\n'
+     '\tf();\n        """;\n    }\n}\n',
+     "a tab inside a target template"),
+])
+def test_a_tab_the_author_wrote_does_not_abort_the_render(src, why):
+    """The end-to-end defect, from outside, in every shape that reaches it.
+
+    A declined construct is emitted as the author's bytes. Put a tab in one
+    and those bytes reach the engine -- as ``Text`` if the body was judged
+    re-anchorable, as ``Verbatim`` if not -- and before ``P3-8`` both paths
+    called ``width_of`` on it and raised. The fail-safe caught the exception
+    and handed the file back with no rule having run, so the formatter did
+    nothing at all to any tab-indented file holding a declined construct.
+
+    Both paths are here on purpose: fixing only the ``Verbatim`` one left the
+    ``Text`` one raising, and a mutation run is what said so.
+
+    The corpus cannot catch any of this. 0 of its 4856 lines contain a tab.
+    """
+    pytest.importorskip("pssparser")
+    from pssfmt.rules import format_source
+    from pssfmt.verify import format_safely
+    assert format_safely(src, formatter=format_source).ok, why
+    once = format_source(src)
+    assert format_source(once) == once, why

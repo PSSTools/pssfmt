@@ -19,6 +19,9 @@ __all__ = [
     "CORPUS_ROOT",
     "CORPUS_REPO",
     "CORPUS_SOURCE",
+    "trailing_whitespace_offenders",
+    "tab_indent_offenders",
+    "lone_brace_offenders",
 ]
 
 
@@ -172,3 +175,37 @@ def broken_buckets() -> tuple:
     return tuple(sorted(
         name for name, spec in data.get("bucket", {}).items()
         if not spec.get("parses", True)))
+
+
+# ---------------------------------------------------------------------------
+# The style properties, as functions (``P3-8``)
+# ---------------------------------------------------------------------------
+#
+# Shared because they have two callers that need to stay in step, and the
+# second one is why they moved here. ``T-20`` runs them over the corpus, where
+# no file reaches the interesting case; ``T-27`` runs them over hand-written
+# foreign text, which is the only place the *exemption* they take can be
+# checked at all. Kept in one place so a change to a gate cannot pass because
+# the hostile test still holds the old copy.
+#
+# Each takes the set of lines ``pssfmt.verbatim.verbatim_lines`` exempted:
+# these are claims about gaps the formatter chose, and a line copied out of a
+# target-template body has none.
+
+
+def trailing_whitespace_offenders(out: str, exempt) -> List[int]:
+    """``docs/style.rst``: 0 of 4856 corpus lines."""
+    return [i for i, line in enumerate(out.splitlines(), 1)
+            if line != line.rstrip() and i not in exempt]
+
+
+def tab_indent_offenders(out: str, exempt) -> List[int]:
+    """Also 0 of 4856, and ``use_tabs`` defaults to false."""
+    return [i for i, line in enumerate(out.splitlines(), 1)
+            if "\t" in line[:len(line) - len(line.lstrip())] and i not in exempt]
+
+
+def lone_brace_offenders(out: str, exempt) -> List[int]:
+    """K&R, 732 of 733. Allman does not occur in the corpus."""
+    return [i for i, line in enumerate(out.splitlines(), 1)
+            if line.strip() == "{" and i not in exempt]

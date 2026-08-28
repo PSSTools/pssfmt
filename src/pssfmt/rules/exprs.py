@@ -28,6 +28,14 @@ being true, and it stops being true twice:
     fourth is spaced, and ``bit[3] in [2..4]`` writes two of them three
     characters apart -- inside a *single* grammar node, which is why
     :func:`_assign_domain_brackets` exists (``P3-5``).
+``<``
+    Two, and they are the sharpest pair in the language because their
+    measured answers are *opposite*. ``a < b`` is ``Site.COMPARISON``, spaced
+    128 times out of 130; ``packed_s<T, 32>`` is
+    ``Site.TEMPLATE_ANGLE_OPEN``, tight 137 times out of 137 (``P3-7``). One
+    character, one token type, and no possible default that is not wrong half
+    the time -- so this is the case that would have to be answered from the
+    tree even if none of the others were.
 
 The grammar already distinguishes all of them: ``unary_op`` and ``add_sub_op``
 are different rules, and so are ``paren_expr``, ``cast_expression`` and
@@ -66,9 +74,6 @@ What this module declines, and why each
     An aggregate literal: 2 instances, 2 files, nothing decidable. Its brace
     would have to borrow ``Site.BRACE_OPEN``, which was measured on 725
     *declaration* braces.
-``<T, N>``
-    A template argument list, reached through a cast's type. ``P3-7``, the
-    same place ``P3-2b`` and ``P3-3`` sent it.
 ``? :``
     Zero instances in the corpus, and the ``:`` would be a fifth colon
     construct with no measured rule. ``docs/style.rst`` names four.
@@ -240,6 +245,27 @@ _BRACKET_SITES = {
 _OPENERS = {"TOK_LPAREN", "TOK_LSBRACE"}
 _CLOSERS = {"TOK_RPAREN", "TOK_RSBRACE"}
 
+#: ``packed_s<T, 32>`` -- the angle pair, kept out of :data:`_BRACKET_SITES`
+#: (``P3-7``).
+#:
+#: Not because it behaves differently -- the assignment below is the same one
+#: -- but because *matching by shape* is what the other pairs do, and ``<``
+#: cannot be matched that way. ``(`` and ``[`` are punctuation whose only
+#: readings are brackets, so a rule owning one owns a pair. ``<`` is
+#: ``TOK_LT``, which is a **comparison operator** everywhere else in this
+#: module and is spaced there; widening :data:`_OPENERS` to include it would
+#: mean every rule in :data:`_BRACKET_SITES` and every
+#: :data:`_DOMAIN_BEARING` node silently started claiming any ``<`` beneath
+#: it. None of them can contain one today, which is exactly the kind of
+#: "safe for now" this module refuses to build on.
+#:
+#: So the angle pair is matched by *token type* against one named rule, and
+#: the ``<`` in ``a < b`` is reached only through ``logical_inequality_op``.
+_ANGLE_SITES = {
+    "template_param_value_list": (Site.TEMPLATE_ANGLE_OPEN,
+                                  Site.TEMPLATE_ANGLE_CLOSE),
+}
+
 #: Rules whose brackets need :func:`_assign_domain_brackets` because one node
 #: can hold two kinds. See there.
 _DOMAIN_BEARING = frozenset({"integer_type", "string_type"})
@@ -251,7 +277,6 @@ _DECLINED = frozenset({
     "exp_op",
     "aggregate_literal",
     "value_list_literal",
-    "template_param_value_list",
     "conditional_expr",
 })
 
@@ -311,6 +336,15 @@ def _walk(ctx: Any, node: Any, sites: Dict[int, Site],
         for child in node.children:
             if not child.is_rule:
                 _assign(ctx, child, site, sites)
+    if name in _ANGLE_SITES:
+        open_site, close_site = _ANGLE_SITES[name]
+        for child in node.children:
+            if child.is_rule:
+                continue
+            if child.token.type_name == "TOK_LT":
+                _assign(ctx, child, open_site, sites)
+            elif child.token.type_name == "TOK_GT":
+                _assign(ctx, child, close_site, sites)
     if name in _DOMAIN_BEARING:
         _assign_domain_brackets(ctx, node, sites)
     elif name in _BRACKET_SITES:

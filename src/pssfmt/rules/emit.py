@@ -181,14 +181,33 @@ def _has_multiline_payload(tokens: Sequence[Any]) -> bool:
     return False
 
 
-def _has_tab_indent(body: str) -> bool:
-    return any("\t" in line[:len(line) - len(line.lstrip())]
-               for line in body.split("\n")[1:])
-
-
 def is_reindentable(tokens: Sequence[Any], body: str) -> bool:
-    """Whether *body* may be re-anchored to a different column."""
-    return not _has_multiline_payload(tokens) and not _has_tab_indent(body)
+    """Whether *body* may be re-anchored to a different column.
+
+    Two refusals, and the second is broader than it first needs to be.
+
+    A **multi-line payload** cannot move because the newlines inside a token
+    are the token's, not the layout's -- see :func:`_has_multiline_payload`.
+
+    A **tab anywhere** cannot move for two reasons that happen to coincide.
+    :func:`reindent` strips leading *spaces* and would silently leave a
+    tab-indented line where it was while its siblings moved; and the lines
+    this function green-lights become :class:`~pssfmt.layout.ir.Text` nodes,
+    which the engine measures with :func:`~pssfmt.layout.width.width_of`, and
+    which refuses a tab outright. That refusal is correct -- a tab in composed
+    text means a rule wrote one -- but these lines are *not* composed, they
+    are the author's bytes being carried, so the answer is to stop calling
+    them composed rather than to weaken the check.
+
+    ``P3-8`` widened this from "a tab in the indentation of a continuation
+    line" to "a tab at all", because the narrow version let a one-line
+    declined construct holding a tab through -- ``c : coverpoint\\tx;`` --
+    and it reached ``width_of`` as ``Text`` and aborted the render. The
+    corpus has 0 tabs in 4856 lines and could not have shown it. The cost of
+    the wider rule is that such a body keeps the column the author gave it,
+    which is what declining has always meant here.
+    """
+    return not _has_multiline_payload(tokens) and "\t" not in body
 
 
 def reindent(body: str, origin: int) -> List[str]:

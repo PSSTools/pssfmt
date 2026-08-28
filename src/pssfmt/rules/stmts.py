@@ -126,12 +126,37 @@ _BIND_VOCABULARY.update({
 _WORD_LIKE = WORD_LIKE | frozenset(_MODIFIERS_AND_TYPES)
 
 
-def _after_a_width_bracket(left: Any, right: Any) -> bool:
-    """``bit[64] x`` -- the seam between a type and the name it declares."""
+def _after_a_width_bracket(left: Any, right: Any,
+                           left_site: Any = None, right_site: Any = None) \
+        -> bool:
+    """The seam between a type and the name it declares.
+
+    Two shapes, and they are asked two different ways on purpose.
+
+    ``bit[64] x`` is asked by token type, because ``]`` ends a type or an
+    index and neither can be followed by a bare name anywhere else in a field
+    declaration -- the character settles it.
+
+    ``packed_s<T, 32> hdr`` cannot be (``P3-7``). ``>`` is ``TOK_GT``, which
+    is also a comparison, so ``a > b`` would answer this the same way and get
+    a floor under a gap that is not a type boundary at all. The *site* is the
+    thing that differs, the emitter has already resolved it, so that is what
+    is asked. This is the same argument as :data:`~pssfmt.rules.exprs`'s angle
+    pair one level down: ``<`` and ``>`` are the tokens in PSS whose spacing
+    is never a fact about the character.
+
+    Without the floor the output is ``packed_s<T, 32>hdr`` -- still two
+    tokens, so token equivalence passes and nothing complains. That is how
+    ``bit[3]in [2..4]`` shipped once.
+    """
+    if left_site is Site.TEMPLATE_ANGLE_CLOSE:
+        return right.type_name in _WORD_LIKE
     return left.type_name == "TOK_RSBRACE" and right.type_name in _WORD_LIKE
 
 
-def _around_a_bind_wildcard(left: Any, right: Any) -> bool:
+def _around_a_bind_wildcard(left: Any, right: Any,
+                            left_site: Any = None, right_site: Any = None) \
+        -> bool:
     """``bind chan_p *`` -- the seam between the path and the bind item."""
     return right.type_name == "TOK_ASTERISK" and left.type_name in _WORD_LIKE
 
@@ -332,6 +357,6 @@ def register(registry) -> None:
     registry.register(
         "object_bind_stmt",
         _make(_BIND_VOCABULARY,
-              lambda left, right: (_after_a_width_bracket(left, right)
-                                   or _around_a_bind_wildcard(left, right)),
+              lambda *args: (_after_a_width_bracket(*args)
+                             or _around_a_bind_wildcard(*args)),
               tree_sites=False))

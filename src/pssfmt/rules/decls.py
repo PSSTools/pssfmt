@@ -62,7 +62,9 @@ from .emit import (
     reindented_layout,
     span_text,
     span_tokens,
+    verbatim_layout,
 )
+from .exprs import sites_for
 from .tokens import WORD, emit_span
 
 #: ``struct_kind`` covers five spellings that lay out the same way but are
@@ -182,6 +184,52 @@ _HEADER_VOCABULARY = {
     "ESCAPED_ID": WORD,
     "TOK_COLON": Site.COLON_INHERITANCE,
     "TOK_LCBRACE": Site.BRACE_OPEN,
+    # ``struct dma_csr_s : packed_s<bit, 32> {`` -- template arguments
+    # (``P3-7``). The single largest cause of declined headers before this
+    # item: 116 of the corpus's 131, across 32 files.
+    #
+    # ``<`` and ``>`` are ``WORD`` here in the sense :mod:`pssfmt.rules.exprs`
+    # established -- recognised, but with no answer of their own. Their site
+    # arrives through ``sites_at`` from :func:`_template_sites`, because
+    # ``TOK_LT`` is *also* the comparison operator and the two have opposite
+    # measured answers. The completeness check there is what makes admitting
+    # them safe: an angle bracket this module cannot account for declines the
+    # header rather than picking up whichever reading came first.
+    "TOK_LT": WORD,
+    "TOK_GT": WORD,
+    "TOK_COMMA": Site.COMMA,
+    # What a template argument can be, besides a name: a literal or a scalar
+    # type. Both word-class, neither with a second reading. Measured inside
+    # the corpus's 137 argument lists, the whole inventory is ID (172), ``,``
+    # (120), DEC_LITERAL (67), ``bit`` (6), ``[`` / ``]`` (6) and ``int`` (1).
+    "DEC_LITERAL": WORD,
+    "HEX_LITERAL": WORD,
+    "OCT_LITERAL": WORD,
+    "BIN_LITERAL": WORD,
+    "TOK_TRUE": WORD,
+    "TOK_FALSE": WORD,
+    "TOK_BIT": WORD,
+    "TOK_INT": WORD,
+    "TOK_BOOL": WORD,
+    "TOK_STRING": WORD,
+    "TOK_FLOAT32": WORD,
+    "TOK_FLOAT64": WORD,
+    "TOK_CHANDLE": WORD,
+    # Note what is deliberately *not* here: ``[`` and ``]``. So
+    # ``packed_s<bit[8], 4>`` still declines -- 6 instances across 4 files.
+    #
+    # That boundary is drawn by the colon argument above and not by effort.
+    # The closure making ``:`` unambiguously inheritance is "no span of these
+    # tokens can contain a ``[``", and a template argument is a constant
+    # *expression*, so admitting the bracket makes ``s<A[3:0]>`` spellable and
+    # ``Site.COLON_BIT_SLICE`` reachable here in principle. Six instances is
+    # not worth trading a proof for a coincidence. Nothing else added for
+    # ``P3-7`` touches that closure: a header cannot contain a case item, so
+    # ``,`` cannot be one, and none of the rest is punctuation at all.
+    #
+    # Admitting the bracket is a real item rather than a refusal -- it wants
+    # the colon closure turned from this comment into a completeness check
+    # over ``:`` first, the way ``<`` is checked below. See ``P3-7a``.
 }
 
 #: ``import pkg::*;`` -- all 147 imports in the corpus, and the same shape
@@ -519,11 +567,71 @@ def _is_trailing_semicolon(ctx: Any,
     return tok.line == prev_entry.token.line
 
 
+def _hatched(ctx: Any, first: int, last: int) -> Optional[_Member]:
+    """Code positions ``first..last`` as one block, byte for byte (``P3-9``).
+
+    The body of a member the author has switched the formatter off over. It is
+    :func:`~pssfmt.rules.emit.verbatim_layout` rather than
+    :func:`~pssfmt.rules.emit.reindented_layout` because re-anchoring is the
+    one transformation a hatch is most often written to prevent: a hand-built
+    alignment table means nothing once its columns move.
+
+    Everything else about a member still applies. The leading comment run --
+    which is where the ``// pssfmt off`` itself lives -- and the trailing
+    comment are emitted by the same code as for any other member, so a hatch
+    does not need its own answer to where comments go.
+
+    One thing here is not byte-exact and it is worth being exact about which:
+    the **first line's indentation**. The enclosing block writes an indent
+    before every member, and a :class:`~pssfmt.layout.ir.Verbatim` cannot
+    refuse it -- there is no layout node for "start at an absolute column".
+    Every line after the first keeps the column the author gave it, which is
+    what makes the table survive. ``P3-9a`` is the note for the layout node
+    that would close the gap.
+    """
+    trivia = ctx.trivia
+    lead = _leading(ctx, trivia.code_indices[first])
+    if lead is None:
+        return None
+    parts: List[Layout] = []
+    if lead.comments is not None:
+        parts.append(lead.comments)
+        parts.append(hardline(lead.blanks_after))
+    parts.append(verbatim_layout(
+        span_text(trivia, first, last, leading=False, trailing=False)))
+    trailing = _trailing(ctx, trivia.code_indices[last])
+    if trailing is _BAIL:
+        return None
+    if trailing is not None:
+        parts.append(trailing)
+    return _Member(lead.blanks_before, concat(parts))
+
+
 def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
                                                         List[Tuple[int, int]]]]:
-    """Members and their spans, or ``None`` if this body should not be touched."""
+    """Members and their spans, or ``None`` if this body should not be touched.
+
+    This is the one place a body's members are gathered -- declarations,
+    constraints and activities all reach it through :func:`_block` -- which is
+    what lets ``P3-9``'s escape hatches be a check here rather than a check in
+    every rule. Below member level nothing is needed either: a directive
+    inside a construct is a comment between two tokens, and
+    :func:`~pssfmt.rules.tokens.emit_span` already declines any span holding
+    one. So the hatch is honoured on both sides of the member boundary, by two
+    mechanisms that were each written for their own reasons.
+
+    Consecutive members inside **one** hatch are reproduced as a single block.
+    That is not an optimisation: the blank lines *between* two members are
+    decided by :func:`_stack` and clamped to ``max_blank_lines``, so members
+    frozen one at a time would still have the spacing between them rewritten.
+    Coalescing puts those gaps inside the copied span, where nothing composes
+    them. The gaps at the region's outer edges are still the formatter's, and
+    correctly so -- a hatch freezes what it encloses, not its surroundings.
+    """
     members: List[_Member] = []
     spans: List[Tuple[int, int]] = []
+    #: Identity of the hatch the previous member belonged to, if any.
+    hatch: Any = None
     for child in children:
         if not child.is_rule:
             # A stray terminal at member level: a separator the grammar puts
@@ -533,6 +641,27 @@ def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
         span = code_span(ctx.trivia, child)
         if span is None:
             continue
+        # Asked before the semicolon merge below, so that a ``;`` inside a
+        # hatch is copied along with what it terminates rather than being
+        # re-composed as ``text(";")`` against the preceding block.
+        covering = ctx.hatches.region_of(*span)
+        if covering is not None:
+            start = span[0]
+            if covering == hatch:
+                start = spans.pop()[0]
+                members.pop()
+            built = _hatched(ctx, start, span[1])
+            if built is None:
+                return None
+            members.append(built)
+            spans.append((start, span[1]))
+            hatch = covering
+            continue
+        # ``hatch`` is deliberately not cleared here. A range is a contiguous
+        # run of code positions, so an unhatched member can never sit between
+        # two members of the *same* range -- there is nothing for a stale
+        # identity to match against. Clearing it would be a guard no test
+        # could distinguish from its absence.
         if _is_trailing_semicolon(ctx, span, spans[-1] if spans else None):
             tail = _trailing(ctx, ctx.trivia.code_indices[span[1]])
             if tail is _BAIL:
@@ -574,17 +703,78 @@ def _members_of(ctx: Any, node: Any, open_at: int, close_at: int) \
     return members
 
 
+def _template_sites(ctx: Any, node: Any, first: int, last: int) -> Any:
+    """Sites for the template arguments in ``first..last``, or ``None``.
+
+    Every ``<`` in a declaration header belongs to one of two constructs, and
+    they are *not* the same construct written twice:
+
+    ``packed_s<bit, 32>``
+        A ``template_param_value_list`` -- a use. 137 in the corpus across 34
+        files, and the most unanimous thing measured so far: tight inside at
+        137/137 on both ends. :mod:`pssfmt.rules.exprs` knows this one.
+
+    ``struct base_s <struct TRAIT : addr_trait_s = empty_addr_trait_s>``
+        A ``template_param_decl_list`` -- a declaration. 16 instances in 5
+        files, and the corpus does **not** agree about them: 7/16 tight after
+        the ``<``, because 5 of the other 9 put the parameter on its own line.
+        A parameter also carries a ``:`` that is a *bound* rather than
+        inheritance, and a ``=`` that is a default, so it is a fifth colon
+        reading in the one vocabulary whose colon closure is load-bearing.
+
+    So this returns sites only for the first, and the second declines --
+    without anything here saying so. ``sites_for`` assigns nothing to a decl
+    list's angles; ``TOK_LT`` and ``TOK_GT`` are in
+    :data:`~pssfmt.rules.exprs.TREE_DECIDED`, so *its own* completeness check
+    refuses the subtree; and refusing one child refuses the header. An absent
+    answer is the decline, which is one fewer thing that can rot.
+
+    That is also why there is no second completeness check over the header
+    span here. There was one, and mutation testing showed it and the refusal
+    below each kept the other alive: every angle bracket in a declaration
+    header belongs to some child rule, so ``sites_for`` has already asked the
+    question and this would only be asking it again one layer up. Two guards
+    where the tests can only see one is how a real guard gets deleted later
+    without anything failing (``P3-4``'s ``>>`` check, ``P3-6``'s ``_effective``
+    return, and now this).
+
+    The children are asked one at a time rather than asking *node*, because
+    *node* is the whole declaration: its span runs to the closing brace, so
+    asking it would let a single declined construct anywhere in the body --
+    ``a**2`` is one, and the corpus has it in two files -- refuse the header
+    of the thing containing it. It would be quadratic as well.
+    """
+    trivia = ctx.trivia
+    sites: dict = {}
+    for child in node.children:
+        if not child.is_rule:
+            continue
+        span = code_span(trivia, child)
+        if span is None or span[0] > last:
+            continue
+        found = sites_for(ctx, child)
+        if found is None:
+            return None
+        sites.update(found)
+    return sites
+
+
 def _header(ctx: Any, node: Any, open_child: Any,
             vocabulary: Any = None, sites: Any = None) -> Layout:
     """Everything up to and including ``{``.
 
     Written out token by token when the header uses *vocabulary*, so that
     ``struct  s:base_s`` normalises to ``struct s : base_s``. Anything outside
-    that vocabulary -- a template parameter list, or a comment sitting
+    that vocabulary -- a template *parameter* list, or a comment sitting
     mid-header -- is reproduced as the author wrote it, with only the gap
     before ``{`` normalised (``Site.BRACE_OPEN``). That was the whole of this
     function before ``P3-2b`` and it remains the fallback, so a header the
     emitter declines is no worse off than it was.
+
+    A template *argument* list is no longer in that set: ``P3-7`` writes
+    ``packed_s<bit, 32>`` out, with the angle sites coming from the tree via
+    :func:`_template_sites`. Declining now has a third trigger alongside the
+    two above -- an angle bracket that walk could not account for.
 
     *vocabulary* and *sites* exist for ``P3-6``. An activity block's header is
     a keyword and a brace -- ``parallel {`` -- and a ``repeat (4) {`` header
@@ -603,9 +793,14 @@ def _header(ctx: Any, node: Any, open_child: Any,
         return text("{")
     first = span[0]
 
-    emitted = emit_span(ctx, first, brace_pos,
-                        _HEADER_VOCABULARY if vocabulary is None else vocabulary,
-                        sites_at={} if sites is None else sites)
+    if vocabulary is None:
+        vocabulary = _HEADER_VOCABULARY
+        sites = _template_sites(ctx, node, first, brace_pos)
+    elif sites is None:
+        sites = {}
+
+    emitted = None if sites is None else emit_span(
+        ctx, first, brace_pos, vocabulary, sites_at=sites)
     if emitted is not None:
         return emitted
 

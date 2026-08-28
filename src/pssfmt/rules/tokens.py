@@ -174,7 +174,7 @@ def emit_span(ctx: Any,
               first: int,
               last: int,
               vocabulary: Vocabulary,
-              separate: Optional[Callable[[Any, Any], bool]] = None,
+              separate: Optional[Callable[..., bool]] = None,
               mark_at: Sequence[int] = (),
               sites_at: Mapping[int, Site] = _NO_SITES,
               break_at: Optional[int] = None) -> Optional[Layout]:
@@ -189,6 +189,17 @@ def emit_span(ctx: Any,
     -- and an identifier has no ``before`` at all. The space is not between a
     bracket and a name, it is between a *type* and a *declarator*, and only
     the rule knows that.
+
+    It is called as ``separate(left, right, left_site, right_site)``. The
+    sites are there because ``P3-7`` produced a seam the *tokens* cannot
+    settle: ``packed_s<T, 32> hdr`` needs the same floor as ``bit[64] x``, but
+    ``>`` is ``TOK_GT``, which is also a comparison -- so a callback keyed on
+    the character alone would fire between ``a > b`` too and claim a type
+    boundary that is not there. Under today's spacing that is invisible,
+    because comparisons are spaced anyway; it would surface the day someone
+    configured them tight, which is precisely the kind of latent wrong answer
+    a floor should not contain. The emitter has already resolved both sites,
+    so it passes them rather than making the caller re-derive them.
 
     Note this is a floor and not an override: it can turn a zero gap into
     one space, never a space into nothing.
@@ -269,7 +280,8 @@ def emit_span(ctx: Any,
             gap = ctx.style.gap(prev_site, site)
             if gap == 0 and (must_separate(prev_token, token)
                              or (separate is not None
-                                 and separate(prev_token, token))):
+                                 and separate(prev_token, token,
+                                              prev_site, site))):
                 gap = 1
             original = _original_gap(trivia, code, pos)
             if pos == break_at:

@@ -45,6 +45,7 @@ from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 from ..layout import Layout, Verbatim, align_text, render
 from ..style import DEFAULT_STYLE, Style
 from ..trivia import TriviaMap
+from ..verbatim import NO_HATCHES, Hatches, scan_hatches
 from .emit import code_span, span_text
 
 __all__ = [
@@ -132,9 +133,15 @@ rule = REGISTRY.rule
 class BuildContext:
     """Everything a builder is allowed to consult.
 
-    Deliberately three things. A builder that needs a fourth is either doing
-    the layout engine's job or reading configuration, and both are the
-    failures this layer exists to prevent -- see ``T-13``.
+    The invariant is what *kind* of thing is here, not how many: the resolved
+    policy, what the author wrote, and which rules are in play. A builder that
+    reaches for anything else is either doing the layout engine's job or
+    reading configuration, and both are the failures this layer exists to
+    prevent -- see ``T-13``.
+
+    ``P3-9`` added the fourth field and it is the third kind, not a new one:
+    ``// pssfmt off`` is something the author wrote, in a comment, saying
+    which of these rules may run where.
     """
 
     #: The resolved policy. Never configuration: see :mod:`pssfmt.style`.
@@ -143,6 +150,8 @@ class BuildContext:
     trivia: TriviaMap
     #: Which builders are in play.
     registry: RuleRegistry = field(default=REGISTRY)
+    #: Where the author has switched the formatter off (``P3-9``, § 5.3).
+    hatches: Hatches = field(default=NO_HATCHES)
 
     def build(self, node: Any) -> Layout:
         """Lays out *node*: its builder if it has one, verbatim if it does not."""
@@ -191,7 +200,8 @@ def build_tree(tree: Any,
                registry: RuleRegistry = REGISTRY) -> Built:
     """Formats an already-parsed tree."""
     trivia = TriviaMap(tree.tokens, max_blank_lines=style.max_blank_lines)
-    ctx = BuildContext(style=style, trivia=trivia, registry=registry)
+    ctx = BuildContext(style=style, trivia=trivia, registry=registry,
+                       hatches=scan_hatches(trivia))
     doc = ctx.build(tree.root)
     text = render(
         doc,

@@ -92,6 +92,23 @@ The layer boundaries
 ``src/pssfmt/style.py``
     The seam between the two. The one module that knows a default.
 
+``src/pssfmt/verbatim.py``
+    What the formatter *copies* rather than composes. Small, and load-bearing
+    for a reason worth stating: every claim the tool makes about its own
+    output -- the style properties, and later ``--check`` and ``--diff`` -- is
+    a claim about gaps it decided, and a target-template ``exec`` body has
+    none. Three corpus gates were quietly making those claims about foreign
+    text and passing only because no corpus file contained an untidy one.
+
+    It answers the question in both directions, and the two are separate
+    passes on purpose. Which output *lines* were copied is asked after
+    formatting, by anything checking the result. Which input *tokens* must not
+    be composed is asked before it, and that is where the ``// pssfmt off``
+    directives resolve to. Putting them in one module is not tidiness: a
+    region the author switched the formatter off over is also a region the
+    style properties cannot be asserted over, and keeping the two answers
+    apart is how the second one gets forgotten.
+
 A rule that writes tokens out, rather than moving the author's text around,
 declares the token types it expects and **declines anything else**. That is
 worth stating as an architectural rule and not an implementation detail,
@@ -146,6 +163,13 @@ and *coverage of the rules that ran* are different measurements, and only the
 second one finds this. Counting how often each builder is actually reached is
 now part of finishing a rule module, and a builder that the corpus never
 reaches is treated as untested however green the suite is.
+
+The measurement earned itself back on the next module. Template arguments are
+137 lists across 34 files, every test passes and the corpus is quiet -- and
+13 of the 137 are never reached, because they sit inside ``exec`` bodies and
+function parameter lists, neither of which has a rule. Nothing in a green
+suite says so. The difference from ``extend`` is only that this was known
+before shipping rather than after, which is the whole point of measuring it.
 
 That last boundary is worth being blunt about, because it is the one with a
 deadline. How many options ``pssfmt`` *exposes* is reversible at any time.

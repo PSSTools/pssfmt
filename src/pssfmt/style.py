@@ -191,6 +191,8 @@ class Site(str, Enum):
     TYPE_BRACKET_CLOSE = "type_bracket_close"
     SET_BRACKET_OPEN = "set_bracket_open"      # in [1..4096]
     SET_BRACKET_CLOSE = "set_bracket_close"
+    TEMPLATE_ANGLE_OPEN = "template_angle_open"    # packed_s<T, N>
+    TEMPLATE_ANGLE_CLOSE = "template_angle_close"
     BRACE_OPEN = "brace_open"
     BRACE_CLOSE = "brace_close"
 
@@ -324,6 +326,21 @@ DEFAULT_SPACING: Mapping[Site, Spacing] = MappingProxyType({
     # `bit[3] in [2..4]`.
     Site.SET_BRACKET_OPEN: Spacing(1, 0),        # 14/16, 11 files against 2
     Site.SET_BRACKET_CLOSE: Spacing(0, 0),
+    # `packed_s<T, 32>` -- a bracket that is not a bracket character, and the
+    # most unanimous site measured so far: tight inside on both ends in every
+    # one of the 137 argument lists the corpus writes, across 34 files.
+    #
+    # Its `before` is a *type* meeting its own argument list rather than one
+    # token meeting another, which is why 135/137 is quoted for it and not
+    # 137/137: two instances write `foo <T>`, in one file.
+    #
+    # Deliberately not shared with any other site. `<` is TOK_LT, which is
+    # also Site.COMPARISON at 128/130 *spaced* -- the same token type with the
+    # opposite answer -- so this is the clearest case in the style of why a
+    # site is a construct rather than a character. Which one a given `<` is
+    # comes from the tree; see `pssfmt.rules.exprs`.
+    Site.TEMPLATE_ANGLE_OPEN: Spacing(0, 0),     # before: 135/137; after: 137/137
+    Site.TEMPLATE_ANGLE_CLOSE: Spacing(0, 0),    # before: 137/137
     Site.BRACE_OPEN: Spacing(1, 0),              # before: 725/732
     Site.BRACE_CLOSE: Spacing(0, 0),
 

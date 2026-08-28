@@ -54,8 +54,8 @@ everywhere: ``*`` is multiplication in an expression and a wildcard in
 ``import pkg::*``, and a table that had to choose would space the wildcard.
 The effect is that this machinery cannot mis-format a construct it was not
 written for -- it can only decline, which leaves your text as you wrote it.
-Headers with a template parameter list are declined today for exactly this
-reason.
+A header holding a template *parameter list* -- ``struct s <type T> { … }``,
+the declaring side -- is declined today for exactly this reason.
 
 Second, a style can set any gap to zero, and that must never change what a
 file *means*. It cannot: a lexical floor sits under every computed gap.
@@ -96,8 +96,49 @@ call, a grouping and a cast in the same expression.
 What is declined: ``**`` (65 instances, but all one author's, unanimously
 tight, against a general rule that says spaced -- one voice cannot decide
 it); ``>>`` (spelled as two ``>`` tokens that must touch inside an operator
-that must not, which per-token spacing cannot express); aggregates and
-template arguments, which belong to rules not yet written.
+that must not, which per-token spacing cannot express); and aggregate
+literals, 2 instances in 2 files, whose brace would have to borrow a site
+measured on 725 declaration braces.
+
+**Target-template ``exec`` bodies are copied, not formatted.** ``exec body C =
+"""…"""`` carries C, or SystemVerilog, or whatever the target consumes. Its
+interior comes out byte-for-byte: tabs, trailing whitespace, blank runs and
+brace style all survive, because they belong to the target language and in
+some of them leading whitespace is semantic.
+
+Two consequences worth knowing before you meet them. The style properties
+below -- no trailing whitespace, no tab indentation, no brace alone on a line
+-- are claims about the gaps ``pssfmt`` *chose*, and they stop at the edge of
+a copied region; enforcing them inside one would mean editing somebody else's
+program. And a file holding a target template cannot be fully re-indented:
+change ``indent_width`` and the ``exec body C = """`` line moves with its
+siblings while the interior and the closing ``"""`` stay in the columns you
+wrote them in, because those columns are part of the string's value. The
+result looks ragged. The alternative is emitting a different program.
+
+**Tabs.** If you indent with tabs, ``pssfmt`` formats what it has rules for
+and leaves the rest where you put it. Until recently it did something much
+worse: any tab-indented file containing a construct with no rule aborted the
+format outright and came back untouched, because the layout engine refused to
+measure a tab. That is fixed, and it is worth naming because no corpus file
+could have found it -- 0 of the corpus's 4856 lines contain a tab.
+
+**Template arguments.** ``packed_s<bit, 32>``, ``transparent_addr_space_c<>``
+-- 137 argument lists across 34 of the 92 corpus files, and until recently the
+single largest thing the formatter would not touch: ``<`` accounted for 131 of
+its 155 declined spans.
+
+It is worth saying why one bracket took its own pass. Every other bracket in
+PSS is punctuation that is only ever a bracket. ``<`` is also the comparison
+operator, and the two constructs have *opposite* measured answers -- ``a < b``
+is written spaced 128 times out of 130, and ``packed_s<T, 32>`` is written
+tight 137 times out of 137. There is no default that is not wrong about half
+the language, so which one a given ``<`` is comes from the parse tree rather
+than from the character, and an angle bracket the formatter cannot account for
+declines the whole header.
+
+The measurement is why the result is quiet: of the 34 files, 33 come out
+byte-identical the first time they are formatted rather than copied.
 
 **Constraints.** ``constraint len in [1..4096];`` and ``constraint c { … }``
 -- both shapes of declaration, and 95 of the corpus's 102 constraint body
@@ -160,6 +201,28 @@ cells -- a table of constants -- it is indistinguishable from no alignment at
 all. And a lone line is reproduced rather than flattened, because one line is
 not a ragged block; it is no evidence, and there is nothing to infer from.
 
+**Escape hatches.** ``// pssfmt off`` / ``// pssfmt on`` and
+``// pssfmt ignore`` all work, and :doc:`style` documents what they promise.
+Two things about them are worth knowing here rather than there.
+
+They cost about forty lines, and the reason is that neither half of the
+mechanism was written for them. Every braced body in the language -- a
+declaration, a constraint, an activity -- collects its members through one
+function, so honouring a hatch at member level is one check rather than one
+per rule. Below member level nothing was needed at all: a directive inside a
+construct is a comment sitting between two tokens, and the token emitter
+already declines any span containing one. The hatch is enforced on both sides
+of the member boundary by two mechanisms that each exist for their own
+reasons.
+
+The other thing is a gap in the evidence, stated because everything else on
+this page rests on measurement. **The corpus contains zero directives**, and
+always will until ``pssfmt`` has users, so none of this is exercised by the
+92 files the way every other rule is. Its tests are the whole of its
+coverage, which is why they are byte comparisons over the malformed cases --
+unmatched, nested, misspelled, at end of file -- rather than over the
+well-formed one.
+
 **The style policy.** Those measurements now exist as values a rule can ask
 for, per construct, rather than as numbers a rule would otherwise write
 inline. That matters less for what ``pssfmt`` does today than for what it can
@@ -180,18 +243,23 @@ Not built yet
    * - **Style rules**
      - Most of them. Declarations, their bodies and their headers are
        formatted, as are ``extend`` blocks, ``import`` statements, field
-       declarations, expressions, constraints and activities; procedural
-       statements, ``exec`` bodies, coverage and template parameter lists are
-       not, and are reproduced exactly until they are. Expressions *inside*
-       those constructs are reproduced with them: a rule cannot lay out a node
-       whose parent has no rule.
+       declarations, expressions, constraints, activities and template
+       arguments; procedural statements, ``exec`` bodies, function prototypes,
+       coverage, ``compile if``, annotations and template *parameter*
+       declarations are not, and are reproduced exactly until they are.
+       Expressions *inside* those constructs are reproduced with them: a rule
+       cannot lay out a node whose parent has no rule. That is not a small
+       caveat -- 13 of the corpus's 137 template argument lists go unformatted
+       for exactly this reason, sitting inside ``exec`` bodies and function
+       parameter lists.
    * - **Command line**
      - ``pssfmt -i``, ``--check``, ``--diff``, ``--lines``. See
        :doc:`quickstart` for the intended interface.
    * - **Configuration**
      - The ``.pssfmt`` file, named base styles, per-glob overrides.
    * - **Escape hatches**
-     - ``// pssfmt off`` / ``on``, ``// pssfmt ignore``, ``.pssfmtignore``.
+     - ``.pssfmtignore``, for skipping whole files by glob. The three
+       in-file directives are built; see above.
    * - **Editor integration**
      - Format-on-save and format-selection through the PSS language server.
 

@@ -7,7 +7,8 @@ A formatter for the Accellera Portable Test and Stimulus Standard.
 
    **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
    declarations, their bodies and their headers, ``extend`` blocks, ``import``
-   statements, field declarations, expressions, constraints and activities;
+   statements, field declarations, expressions, constraints, activities and
+   template arguments;
    every other construct is reproduced exactly until its rule is written. That
    is by design rather than by accident: a construct with no rule falls back to
    the formatter that changes nothing, so an incomplete rule set cannot corrupt
