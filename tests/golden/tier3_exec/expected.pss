@@ -1,0 +1,63 @@
+// `exec` blocks: PSS spells three different things with one keyword, and
+// only one of them is code this formatter may touch. All three are here, in
+// one file, because the whole risk of `P3-8a` is telling them apart.
+
+package exec_pkg {
+
+    component dma_c {
+
+        bit[64]  base_addr;
+
+        // A native exec body: ordinary PSS, and every statement in it reaches
+        // the rules `P3-11b` wrote. Deliberately mis-spaced.
+        exec init_up {
+            addr_handle_t h;
+            h = make_handle_from_claim(dst);
+            regs.ctrl.write(h);
+        }
+
+        action xfer {
+            rand bit[32] len;
+
+            // Statements inside an exec inside an action: two levels of body
+            // that had no rule until this item.
+            exec body {
+                int   nwords = len / 4;
+                match (comp.mode) {
+                    [0]: poke(h, 0);
+                    default: poke(h, 1);
+                }
+            }
+
+            // A *target-code* exec: the payload is foreign text and must come
+            // out byte for byte, indentation included. `P3-8` -- no builder,
+            // on purpose, and reaching the wrapper above it changes nothing.
+            exec body C = """
+                  for (int i = 0; i < {{len}}; i++) {
+                        poke(i);
+                  }
+            """;
+        }
+
+        // An exec with the formatter switched off inside it. `P3-9`'s hatch
+        // is a check in `decls._collect`, which is the one place a body's
+        // members are gathered -- so it covers procedural statements without
+        // anything having been written for them.
+        exec post_solve {
+            // pssfmt off
+            a   =   1;
+            bb  =   2;
+            // pssfmt on
+            c   = 3;
+        }
+
+        // ...and the same directive misspelt, which is an ordinary comment
+        // and formats normally. The match is exact on purpose: prose about
+        // the formatter must never switch it off. `P3-9b` is the note for
+        // reporting these rather than swallowing them.
+        exec pre_solve {
+            // pssfmt: off
+            d   = 4;
+        }
+    }
+}

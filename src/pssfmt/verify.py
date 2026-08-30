@@ -47,6 +47,7 @@ from pssparser import cst as _cst
 from pssparser import tokens as _tokens
 
 from . import null as _null
+from .finish import normalize as _normalize
 
 __all__ = [
     "Violation",
@@ -141,11 +142,26 @@ def check_token_equivalence(original: str,
     reasons: a code-token difference is a rule emitting or eating text, while a
     comment difference is nearly always the trivia map attaching a comment to
     the wrong side of something.
+
+    Both sides are compared with line endings normalised, and that exemption
+    is narrow enough to state exactly: it permits ``\\r\\n`` <-> ``\\n`` and
+    nothing else, anywhere. It is needed because a line ending can live
+    *inside* a token -- a multi-line ``/* */`` comment and a triple-quoted
+    ``exec`` template are each one token whose text spans lines -- so
+    converting a file's line endings, which ``line_ending: lf`` exists to do,
+    necessarily rewrites token text. Without this, that option declined every
+    file containing a block comment and blamed the formatter for it.
+
+    What is given up is small and what is kept is not: a dropped comment, an
+    altered one, a merged token or a deleted byte all still fail. The
+    conversion this permits is byte-level, total, and its own inverse -- it is
+    checkable without a parser, which is why it is allowed to happen outside
+    the part a parser checks.
     """
     out: List[Violation] = []
 
-    a = _significant(_tokens.tokenize(original))
-    b = _significant(_tokens.tokenize(formatted))
+    a = _significant(_tokens.tokenize(_normalize(original)))
+    b = _significant(_tokens.tokenize(_normalize(formatted)))
     diff = _first_difference([(t.type, t.text) for t in a],
                             [(t.type, t.text) for t in b])
     if diff is not None:
@@ -154,8 +170,8 @@ def check_token_equivalence(original: str,
     # Trailing whitespace inside a comment is not content, and stripping it is
     # something the formatter is expected to do. A `//` comment carries its own
     # newline, which rstrip takes off both sides alike.
-    ca = [t.text.rstrip() for t in _comments(_tokens.tokenize(original))]
-    cb = [t.text.rstrip() for t in _comments(_tokens.tokenize(formatted))]
+    ca = [t.text.rstrip() for t in _comments(_tokens.tokenize(_normalize(original)))]
+    cb = [t.text.rstrip() for t in _comments(_tokens.tokenize(_normalize(formatted)))]
     cdiff = _first_difference(ca, cb)
     if cdiff is not None:
         i = cdiff

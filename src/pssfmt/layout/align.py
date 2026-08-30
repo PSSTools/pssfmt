@@ -224,16 +224,35 @@ def _groups(
 
     for i, line in enumerate(lines):
         p = parsed[i]
-        terminates = _is_boundary(line, p, boundary)
-        if not terminates and p.marked and group_indent is not None and p.indent != group_indent:
-            terminates = True
 
-        if terminates:
+        if _is_boundary(line, p, boundary):
+            # A boundary *line* -- a blank, or a separator comment. It belongs
+            # to no group on either side.
             if start is not None:
                 result.append((start, i))
             start = None
             group_indent = None
             continue
+
+        if p.marked and group_indent is not None and p.indent != group_indent:
+            # An indentation change ends the group -- and **opens the next
+            # one**, which is the difference between this and a boundary line.
+            #
+            # It did not, until ``P3-8a``. The line that triggered the change
+            # was closed over and then skipped, so it joined no group at all
+            # and its mark was never resolved: it kept the author's spacing
+            # under *every* mode, ``flush-left`` included, which promises one
+            # space at every stop. Nothing was wrong with the rule; the line
+            # that ends a group is simply not the same thing as a line that
+            # separates two.
+            #
+            # Invisible until this item because it needs two marked lines at
+            # different depths with no blank between them, and until function
+            # bodies, `match` blocks and `exec` bodies were formatted there
+            # was almost nowhere for that to happen.
+            result.append((start, i))
+            start = None
+            group_indent = None
 
         if p.marked:
             if start is None:
@@ -289,11 +308,24 @@ def _resolve_group(
         # different reason: ``infer`` needs a run to infer from, so one line
         # is not a ragged block, it is *no evidence*. Collapsing its padding
         # would be a guess presented as a decision.
-        if len(members) < 2 or _was_aligned(parsed, members):
-            for i in members:
-                out[i] = lines[i].replace(ALIGN_MARK, "")
-        else:
-            _emit_flush_left(parsed, members, min_spacing, out)
+        # Decided per *run*, not per group (``P3-11c``). See :func:`_runs`.
+        #
+        # ``len(members) < 2`` is asked of the **group** and not of the run,
+        # and the distinction is the whole difference between this and
+        # ``preserve``. A group with one marked line is reproduced because one
+        # line is no evidence. A *run* of one inside a larger group is the
+        # opposite: its neighbours are marked, they reach a different column,
+        # and that is evidence -- of a near-miss, which is precisely what
+        # ``infer`` exists to flatten. Getting this backwards reproduces every
+        # ragged block in the corpus, which is how the first version of this
+        # function behaved and how it was caught.
+        lone = len(members) < 2
+        for run in _runs(parsed, members):
+            if lone or (len(run) > 1 and _was_aligned(parsed, run)):
+                for i in run:
+                    out[i] = lines[i].replace(ALIGN_MARK, "")
+            else:
+                _emit_flush_left(parsed, run, min_spacing, out)
         return
 
     if mode is AlignMode.FLUSH_LEFT:
@@ -317,6 +349,61 @@ def _resolve_group(
 
     for i, textline in rendered.items():
         out[i] = textline
+
+
+def _first_stop(p: _Line) -> int:
+    """The column *p*'s first stop reaches. A marked line always has one."""
+    return width_of(p.cells[0]) + p.pads[0]
+
+
+def _runs(parsed: Sequence[_Line], members: Sequence[int]) -> List[List[int]]:
+    """*members* split into maximal consecutive runs sharing a first column.
+
+    ``P3-11c``, and the reason it exists is worth stating because the old
+    behaviour looks reasonable until you see what it does to real code. A
+    group is delimited by blank lines, and ``infer`` used to ask "is *this
+    whole group* aligned?" -- so one line that reached a different column made
+    the answer no, and the entire group was flushed. Including the columns
+    that did line up::
+
+        addr_handle_t h;
+        addr_handle_t h2;
+        h  = make_handle_from_claim(dst);      <- column 3, deliberately
+        h2 = make_handle_from_handle(h, 4);    <- column 3
+
+    Four marked lines, two tables, one group. The declarations reach column 14
+    and the assignments reach column 3, so the group disagrees, so the
+    assignments lost a column their author had built. That is not an unusual
+    shape -- it is what a procedural body looks like, and it only became
+    visible when ``P3-11b`` and ``P3-8a`` started formatting the statements
+    inside one. Nine lines across three corpus files, every one of them a
+    column destroyed and none of them a gap normalised.
+
+    The generalisation is small: a table is a run of lines that reach the same
+    column, and a group may hold several. The old rule is the special case
+    where the group is one run, so nothing that was reproduced before stops
+    being reproduced -- this can only preserve more.
+
+    Runs are split on the **first** stop rather than on all of them, because
+    the first is what a reader sees as "the column"; a later stop that
+    disagrees is what :func:`_was_aligned` is for, and it still judges the
+    whole run. Splitting on every stop would make each disagreement its own
+    run of one, and a run of one is reproduced -- which would turn ``infer``
+    into ``preserve`` by accident.
+    """
+    runs: List[List[int]] = []
+    for i in members:
+        # Compared against the run's *last* member, which reads as "does this
+        # line continue the one above it". Comparing against its first is a
+        # mutant nothing kills, and cannot be killed: every member of a run
+        # has the same first stop by construction, so the two expressions are
+        # equal on every input this can be handed. Written the adjacent way
+        # because that is the property being maintained.
+        if runs and _first_stop(parsed[i]) == _first_stop(parsed[runs[-1][-1]]):
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    return runs
 
 
 def _was_aligned(parsed: Sequence[_Line], members: Sequence[int]) -> bool:

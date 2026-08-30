@@ -23,8 +23,9 @@ import pytest
 
 pytest.importorskip("pssparser")
 
+from pssfmt.finish import finish  # noqa: E402
 from pssfmt.rules import REGISTRY, RuleRegistry, format_source  # noqa: E402
-from pssfmt.style import Style  # noqa: E402
+from pssfmt.style import DEFAULT_STYLE, Style  # noqa: E402
 from pssfmt.verify import format_safely  # noqa: E402
 from support import CORPUS_ROOT, CORPUS_SOURCE, corpus_files  # noqa: E402
 
@@ -69,9 +70,18 @@ def test_the_empty_rule_set_reproduces_the_file(path):
     Deliberately broken input matters *more* here, not less: a file the user
     was in the middle of editing is exactly what a formatter must not mangle,
     and it is where the tree is least like the source.
+
+    "Byte for byte" is measured against the input **through the emit
+    boundary**, not against the input, and the distinction is the whole
+    content of ``pssfmt.finish``. ``insert_final_newline`` and ``line_ending``
+    are file-level style options that were always meant to change files; they
+    just did not, so this assertion read as byte identity for two phases. It
+    is exactly as strong either way -- ``finish`` is a projection, so
+    comparing against it still catches any byte the rule layer moves -- and
+    only one of the two spellings is true.
     """
     src = read(path)
-    assert format_source(src, registry=EMPTY) == src
+    assert format_source(src, registry=EMPTY) == finish(src, DEFAULT_STYLE)
 
 
 @pytest.mark.parametrize("path", FILES, ids=ident)
@@ -86,7 +96,8 @@ def test_it_agrees_with_the_null_formatter(path):
     from pssfmt.null import format_null
 
     src = read(path)
-    assert format_source(src, registry=EMPTY) == format_null(src).text
+    assert (format_source(src, registry=EMPTY)
+            == finish(format_null(src).text, DEFAULT_STYLE))
 
 
 @pytest.mark.parametrize("path", FILES, ids=ident)
@@ -103,21 +114,29 @@ def test_no_file_trips_the_fail_safe(path):
     assert result.ok, (
         "%s tripped the fail-safe: %s"
         % (ident(path), result.error or list(result.violations)))
-    assert result.text == src
+    assert result.text == finish(src, DEFAULT_STYLE)
 
 
 @pytest.mark.parametrize("path", FILES, ids=ident)
-def test_the_style_cannot_move_a_byte_while_no_rule_exists(path):
-    """Nothing consults the policy yet, so nothing may react to it.
+def test_the_only_thing_the_style_can_move_is_the_emit_boundary(path):
+    """A containment claim, and the second thing ``P4-1`` needed pinned.
 
-    A cramped width and tab indentation would visibly reflow anything that
-    was being laid out rather than reproduced. Cheap now; it stops meaning
-    anything the moment ``P3-2`` lands, and should be deleted then rather
-    than weakened.
+    A cramped width and tab indentation would visibly reflow anything being
+    laid out rather than reproduced, so with nothing registered the output
+    must be independent of all of it. That was once spelled "the style cannot
+    move a byte", with a note that it should be *deleted* rather than weakened
+    once ``P3-2`` landed. It is neither: the emit boundary is a place the
+    style legitimately reaches with no rule involved, so the claim is restated
+    to say which place, which is a stronger thing to assert than nothing.
+
+    ``line_ending`` and ``insert_final_newline`` are held at their defaults
+    here on purpose -- varying them would only re-test ``finish`` -- while
+    every option a *rule* consults is pushed to an extreme.
     """
     src = read(path)
     cramped = Style(print_width=20, indent_width=8, use_tabs=True, max_blank_lines=0)
-    assert format_source(src, style=cramped, registry=EMPTY) == src
+    assert (format_source(src, style=cramped, registry=EMPTY)
+            == finish(src, cramped))
 
 
 def test_the_shipped_registry_is_not_the_one_under_test():

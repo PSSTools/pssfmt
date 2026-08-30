@@ -188,6 +188,101 @@ class TestGroupBoundaries:
             assert got[1] == "    bbbbbb; // y", boundary
 
 
+class TestRunsWithinAGroup:
+    """``P3-11c`` -- a group may hold more than one table.
+
+    ``infer`` used to ask "is this whole group aligned?", so one line reaching
+    a different column flushed everything, including the columns that did line
+    up. That is rare in a declaration body, where every member is the same
+    shape, and it is *normal* in a procedural body::
+
+        addr_handle_t h;
+        addr_handle_t h2;
+        h  = make_handle_from_claim(dst);
+        h2 = make_handle_from_handle(h, 4);
+
+    Two tables, one group, and the old rule destroyed the second. It only
+    became visible when ``P3-11b`` and ``P3-8a`` started formatting the
+    statements inside a function and an ``exec`` -- nine lines across three
+    corpus files, every one a column lost and none a gap normalised.
+    """
+
+    def test_two_tables_in_one_group_both_survive(self):
+        src = lines(
+            f"aaaa{M} b;",
+            f"aaaa{M} c;",
+            f"d{M}    e;",
+            f"f{M}    g;",
+        )
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert got == ["aaaa b;", "aaaa c;", "d    e;", "f    g;"]
+
+    def test_a_run_of_one_inside_a_group_is_still_flushed(self):
+        """The half that keeps this from being ``preserve``.
+
+        A group with **one** marked line is reproduced -- one line is no
+        evidence. A *run* of one inside a larger group is the opposite: its
+        neighbours are marked and reach a different column, which is evidence
+        of a near-miss, and flattening those is what ``infer`` is for. The
+        first version of this got it backwards and reproduced every ragged
+        block in the corpus.
+        """
+        src = lines(f"a{M}   x;", f"bb{M}   y;", f"ccc{M}   z;")
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert got == ["a x;", "bb y;", "ccc z;"]
+
+    def test_a_lone_marked_line_is_still_reproduced(self):
+        src = lines(f"a{M}   x;", "// not marked")
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert got[0] == "a   x;"
+
+    def test_a_whole_group_that_agrees_is_unaffected(self):
+        """The old rule is the special case where the group is one run, so
+        nothing that was reproduced before stops being reproduced."""
+        assert align_text(ALIGNED, mode=AlignMode.INFER) == strip_marks(ALIGNED)
+        assert align_text(UNALIGNED, mode=AlignMode.INFER) == lines(
+            "bit[8]  addr; // offset",
+            "bit[32] data; // payload",
+            "bit     valid; // strobe",
+        )
+
+
+class TestTheLineThatEndsAGroup:
+    """A marked line whose indent differs **opens the next group**, and until
+    ``P3-8a`` it opened nothing.
+
+    The old code closed the group over it and then skipped it, so that line
+    joined no group at all and its mark was never resolved -- it kept the
+    author's spacing under *every* mode, ``flush-left`` included, which
+    promises one space at every stop. A line that *ends* a group is not the
+    same thing as a line that *separates* two, and the two were one branch.
+
+    Invisible before this item because it needs two marked lines at different
+    depths with no blank between them, and until function bodies, ``match``
+    blocks and ``exec`` bodies were formatted there was almost nowhere in the
+    output for that to happen.
+    """
+
+    SRC = lines(f"a{M}   b;", f"    c{M}   d;", f"    e{M} f;")
+
+    def test_flush_left_reaches_every_stop(self):
+        got = align_text(self.SRC, mode=AlignMode.FLUSH_LEFT).split("\n")
+        assert got == ["a b;", "    c d;", "    e f;"]
+
+    def test_the_deeper_lines_are_a_group_of_their_own(self):
+        """Not a group of one plus an orphan: ``c`` and ``e`` reach different
+        columns, so under ``infer`` both are flushed -- which can only happen
+        if ``c`` is a member of something."""
+        got = align_text(self.SRC, mode=AlignMode.INFER).split("\n")
+        assert got == ["a   b;", "    c d;", "    e f;"]
+
+    def test_no_mark_survives_any_mode(self):
+        """The general form of the defect: an unresolved mark is a mark that
+        gets stripped with whatever spacing happened to follow it, silently."""
+        for mode in AlignMode:
+            assert M not in align_text(self.SRC, mode=mode)
+
+
 class TestAbandonOverLimit:
     def test_alignment_never_causes_an_overflow(self):
         """Verible's rule, and the reason alignment can be on by default.

@@ -3,13 +3,14 @@ pssfmt
 
 A formatter for the Accellera Portable Test and Stimulus Standard.
 
-.. warning::
+.. note::
 
-   **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
+   **The rule set is incomplete, and says so.** ``pssfmt`` formats
    declarations, their bodies and their headers, ``extend`` blocks, ``import``
-   statements, field declarations, expressions, constraints, activities and
-   template arguments;
-   every other construct is reproduced exactly until its rule is written. That
+   statements, field declarations, expressions, constraints, activities,
+   template arguments, ``enum`` declarations, function prototypes and bodies,
+   the statements inside them, and ``exec`` bodies.
+   Every other construct is reproduced exactly until its rule is written. That
    is by design rather than by accident: a construct with no rule falls back to
    the formatter that changes nothing, so an incomplete rule set cannot corrupt
    anything, and adding a rule cannot make an unrelated construct worse.
@@ -26,6 +27,8 @@ for it is the usual way a formatter's documentation becomes useless to both.
    :caption: Using pssfmt
 
    quickstart
+   cli
+   configuration
    style
    status
 

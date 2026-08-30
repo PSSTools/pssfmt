@@ -381,8 +381,13 @@ def register(registry) -> None:
         def builder(ctx, node):
             if node.rule_name == _ANONYMOUS_BLOCK and not _has_keyword(node):
                 return _reproduce(ctx, node)
+            # ``sites={}`` rather than left to default, since ``P3-11a``:
+            # ``None`` there is now a decline, and these headers are a
+            # keyword and a brace -- there is genuinely nothing for the tree
+            # to classify, which is a different statement from "do not touch
+            # this header" and now spelled differently.
             return _block(ctx, node, construct,
-                          vocabulary=_BLOCK_HEADER_VOCABULARY)
+                          vocabulary=_BLOCK_HEADER_VOCABULARY, sites={})
         return builder
 
     for rule_name, construct in _BLOCK_RULES.items():

@@ -93,6 +93,12 @@ Layout
    * - **One space before** ``{``
      - 725 / 732
      - ``component c {``
+   * - **One space inside a one-line body**
+     - 7 / 10
+     - ``enum op_mode_e { FAST, SLOW }``. The only body PSS writes on one
+       line, and therefore the only place these two gaps exist at all: every
+       other ``{`` in the corpus is followed by a line break. The three that
+       disagree are both files of the published 3.1 standard library.
    * - **At most one blank line**
      - 667 runs of 1
      - Two consecutive blank lines occur twice in the whole corpus.
@@ -244,6 +250,23 @@ plain about: the numbers agreeing today does not make the decisions the same
 one. A house style that spaces a call's arguments has said nothing about
 whether ``(a + b)`` should become ``( a + b )``, and one setting answering
 both questions would be a coincidence hardened into an interface.
+
+**Colons: a fifth construct.** ``docs/style.rst`` names four readings of
+``:`` and an ``enum``'s base type is a fifth -- ``enum spi_mode_e : bit[2]``.
+It takes the inheritance rule, spaced, because that is what it is: the type
+the enum is based on. 4 of 4 in the corpus agree, against a rule measured at
+355 of 358.
+
+A **function's parameter list** goes the other way, and for the reason that
+argument gives rather than against it: ``function void poke(bit[32] addr)``
+takes the call's rule, because the survey cannot tell the two apart. It
+counts a name followed by ``(``, and its 241 / 244 already includes all 150
+prototypes in the corpus -- three of the four dissenters are prototypes. So
+there is one measurement here, and splitting it into two rules would mean
+inventing a second default out of the first one's evidence. Other formatters
+do separate them (``clang-format`` has a setting for the declaring side
+alone); the day this corpus can say something about that split is the day to
+add the rule, and it is a change to the survey first.
 
 A note on what is *not* decided here: **parentheses you wrote are kept, and
 parentheses you did not write are never added.** ``a + b * c`` does not
@@ -513,6 +536,22 @@ run; with a single line there is no run and therefore no conclusion, so
 collapsing its spacing would be a guess presented as a decision. One line is
 not a ragged block -- it is no evidence.
 
+**Where the columns are.** ``infer`` can only keep a column somewhere a rule
+said one may exist, so the list is worth stating: a trailing comment, the
+declarator and the ``=`` of a declaration, the seams of a flow or resource
+reference, the ``=`` of a run of assignments (22 padded of 93, across 8
+files), and the statement after a ``match`` arm's ``:`` (13 of 199, four
+complete tables). A ``function`` prototype's name column is deliberately
+**not** on that list: the corpus pads it once, in one file, against 149 that
+do not, and one voice does not make a column.
+
+One consequence is worth knowing before you meet it. ``infer`` asks whether
+*every* marked column in a block lines up, so a line that carries a stop it
+cannot satisfy loses the columns it could -- two assignments that align their
+trailing comments but not their ``=`` come out flush. Judging each column
+independently is a change to this mode rather than to a rule, and it has not
+been made.
+
 Alignment runs *after* line breaking and can never affect a fit decision, and
 it is abandoned for a block that would push past ``print_width``.
 
@@ -614,6 +653,28 @@ Two consequences follow, and the second one usually surprises people:
 * **A line break is fine.** A newline is whitespace like any other, so
   ``pssfmt`` may break a long expression next to an escaped identifier just as
   it would anywhere else. There is no rule keeping breaks away from them.
+
+The end of the file
+-------------------
+
+Three things about the last line, grouped because they are one decision: the
+tail of a file is the part no construct owns, so it is the part where a
+formatter is most likely to have no opinion at all.
+
+* **Every file ends with exactly one newline.** A file with none gains one;
+  a file with several loses the extras.
+* **Trailing whitespace is removed from every line, including the last.**
+  Which sounds like it goes without saying, and did not: the last line was the
+  one line of the file that no rule rendered.
+* **A file keeps the line ending it was written with.** ``\r\n`` if that is
+  what it uses, ``\n`` otherwise. A file that mixes them is given whichever it
+  uses more, so a formatted file always has exactly one kind.
+
+The first two apply inside a ``pssfmt off`` region as well, and that is the
+one place these rules reach past an escape hatch. A hatch suspends decisions
+about *your code*; where the file ends is not one of them, and a hatch that
+could leave a file without a final newline would make ``--check`` unstable for
+everyone downstream.
 
 What ``pssfmt`` will never do
 -----------------------------

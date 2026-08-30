@@ -84,7 +84,8 @@ from ..layout import (ALIGN_MARK, LINE, SOFTLINE, Layout, concat, group,
                       indent, text)
 from ..style import Site
 
-__all__ = ["WORD", "Vocabulary", "must_separate", "floor_gap", "emit_span"]
+__all__ = ["WORD", "Vocabulary", "must_separate", "floor_gap", "emit_span",
+           "original_gap"]
 
 
 class _Word:
@@ -314,7 +315,7 @@ def emit_span(ctx: Any,
             if gap == 0 and separate is not None and separate(
                     prev_token, token, prev_site, site):
                 gap = 1
-            original = _original_gap(trivia, code, pos)
+            original = original_gap(trivia, code, pos)
             if pos == break_at:
                 broke_at = len(parts)
                 parts.append(LINE if gap else SOFTLINE)
@@ -330,9 +331,15 @@ def emit_span(ctx: Any,
 
     if broke_at is None:
         return concat(parts)
+    # `continuation_indent`, not `indent_width`: this is the one place in the
+    # rules where a line is continued rather than nested, and the two are
+    # separate options in the config for exactly that reason. They are both 4
+    # by default, so the distinction is invisible until somebody sets one --
+    # which is what `P4-2` made possible, and how this was found. Until then
+    # `continuation_indent` was a declared option that nothing read.
     return group(concat(
         parts[:broke_at]
-        + [indent(concat(parts[broke_at:]), ctx.style.indent_width)]))
+        + [indent(concat(parts[broke_at:]), ctx.style.continuation_indent)]))
 
 
 def _discardable(run: Any) -> bool:
@@ -340,11 +347,19 @@ def _discardable(run: Any) -> bool:
     return all(not tok.text.strip() for tok in run)
 
 
-def _original_gap(trivia: Any, code: Any, pos: int) -> Optional[int]:
+def original_gap(trivia: Any, code: Any, pos: int) -> Optional[int]:
     """Columns the author left before the token at *pos*, or ``None``.
 
     ``None`` where the two tokens are on different lines, which is not a gap
     on any one line and so cannot be a column stop.
+
+    Public since ``P3-11b``, which places a column stop by composing layouts
+    rather than through :func:`emit_span`'s *mark_at*: a match choice's
+    statement is built by its own rule, so the mark has to be written between
+    two layouts instead of between two tokens. What a stop needs there is
+    identical -- the mark, and *the author's own spacing after it* -- so the
+    measurement is shared rather than restated. See *mark_at* on why the
+    original gap and not the computed one.
     """
     before = trivia.of(code[pos - 1]).raw_trailing
     after = trivia.of(code[pos]).raw_leading

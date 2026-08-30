@@ -1,14 +1,16 @@
 Project status
 ==============
 
-.. warning::
+.. note::
 
-   **Pre-alpha, and there is no command-line tool yet.** ``pssfmt`` formats
-   declarations, their bodies and headers, ``extend`` blocks, ``import``
-   statements, field declarations, expressions, constraints and activities;
-   everything else in a file is reproduced exactly. This page says what is
-   built, what is not, and in what order the rest lands -- so that the gap is
-   visible rather than inferred from a command that does not work.
+   ``pssfmt`` formats declarations, their bodies and headers, ``extend``
+   blocks, ``import`` statements, field declarations, expressions,
+   constraints, activities, template arguments, ``enum`` declarations,
+   function prototypes and bodies, the statements inside them, and ``exec``
+   bodies; everything else in a file is reproduced exactly. This page says what
+   is built, what is not, and in what order the rest lands -- so that the gap
+   is visible rather than discovered as a construct that mysteriously never
+   changes.
 
 Built and tested
 ----------------
@@ -35,8 +37,8 @@ malformed input, and the verifier accepts every one.
 over that corpus rather than from preference. See :doc:`style`.
 
 **Declaration layout.** Brace placement, member indentation, and the
-blank-line policy between members, for ``package``, ``component``, ``action``
-and all five ``struct`` kinds. Comments are the hard part of that and are
+blank-line policy between members, for ``package``, ``component``, ``action``,
+all five ``struct`` kinds, and **function bodies**. Comments are the hard part of that and are
 where the work went: a comment above a member moves with it, a trailing
 comment stays on its line, and a comment alone in an otherwise empty body --
 the one no member owns -- survives.
@@ -63,6 +65,104 @@ Escaped identifiers are the case that forces it -- ``\name`` runs to the next
 whitespace and swallows whatever follows, so ``\name{`` is a single token,
 and a zero gap before ``{`` would turn a declaration into an identifier with
 nothing else in the file looking wrong.
+
+**Function bodies.** ``function bit[32] f(int ch) { … }`` -- 118 of them
+across 46 of the 92 corpus files, and until recently the largest construct the
+formatter did not reach at all. That mattered for more than the functions: a
+rule can only run on a node whose ancestors all have rules, so *everything*
+inside every one of those bodies was reproduced verbatim too.
+
+What a function body gets is the block: the brace pulled onto the header line,
+the body indented, blank runs clamped, and comments attached to the statement
+they belong to.
+
+One consequence is visible on well-kept code and looks like a regression until
+you know the rule: a body written on one line is opened out. 117 of the
+corpus's 118 functions are already written open, so the odd one out moves.
+
+**Statements inside a body.** ``return -1;``, ``ctrl.en = 1;``, ``x += 2;``,
+``regs.ch[n].write(x);``, ``int nwords = nbytes / 4;`` -- and ``match``, which
+is a block rather than a statement and is here for a reason worth knowing::
+
+    match (name) {
+        ["ctrl"]:   return SPI_CTRL_OFF;
+        ["status"]: return SPI_STATUS_OFF;
+        default:    return -1;
+    }
+
+**195 of the corpus's 201 ``return`` statements are inside one of those.** A
+rule can only run on a node whose ancestors all have rules, so formatting the
+statements without formatting ``match`` would have reached 9 returns out of
+201 while every test passed. That is why the two landed together.
+
+Two hand-built columns are preserved rather than flattened, because the corpus
+builds both in several independent files: the ``=`` of a run of assignments
+(22 padded of 93, across 8 files) and the statement column after a match arm's
+``:`` (13 of 199, four complete tables). As everywhere else, ``pssfmt`` keeps a
+column you actually reached and flattens a near-miss -- see :doc:`style`.
+
+What a statement does not get:
+
+* **``if``/``else``** is left exactly as written, because ``docs/style.rst``
+  does not say where ``} else {`` goes and five corpus instances in three
+  files cannot decide it.
+* **Loops.** ``repeat (i : n) { … }`` carries a colon that is a fifth reading
+  of a character the style already splits four ways, and
+  ``repeat { … } while (e);`` puts its block in the *middle* of the statement,
+  which the block layout cannot express at all.
+* **A statement you wrapped across lines**, for the reason a wrapped prototype
+  is left alone: formatting it means joining it, and six of the corpus's seven
+  wrapped calls join to between 86 and 108 columns.
+
+**``exec`` bodies.** ``exec body { … }``, ``exec init_up { … }`` and the rest
+-- 28 in the corpus across 18 files, holding 109 statements that were
+reproduced verbatim until the statements themselves had rules. An exec body is
+a function body with a different header, so everything above applies inside
+one.
+
+PSS spells three different things with the same keyword, and only this one is
+touched. ``exec body C = """…"""`` and ``exec file "x" = """…"""`` carry
+foreign text, and that text comes out **byte for byte** -- indentation
+included, and unchanged even if you change ``indent_width``. Re-anchoring a
+generated payload changes what it generates.
+
+**Function headers.** ``function  bit[32]   f( int   ch )`` becomes
+``function bit[32] f(int ch)``, in all three places PSS writes a prototype:
+a definition, a declaration (``function void f(bit[8] x);``) and an import
+(``import target C function void poke(bit[32] addr);``). The gaps come from
+the same sites a *call* uses, which is a measurement rather than a shortcut --
+the survey counts a name followed by ``(`` without caring which it is looking
+at, so there is one number here and not two.
+
+Two things a prototype does not get, both refusals rather than gaps:
+
+* **A prototype you wrapped across lines is left exactly as written.**
+  Formatting it means joining it onto one line, and the ones people wrap are
+  wrapped because the joined form is past the width. Three of the corpus's
+  five are hand-aligned parameter tables. Laying those out properly needs a
+  break policy for a parameter list, which is not yet decided -- so the
+  header is reproduced and *the body inside it is still formatted*.
+* **Varargs** (``function void f(int... args)``) declines, because the corpus
+  contains one and one instance cannot decide a spacing rule.
+
+**Enums.** ``enum op_mode_e { FAST, SLOW }`` and::
+
+    enum dma_addr_mode_e : bit[1] {
+        DMA_ADDR_FIXED = 0,
+        DMA_ADDR_INCR  = 1
+    }
+
+The one body in PSS that is written on a single line more often than not, and
+what decides between the two forms is **whether the items carry values** --
+not how wide the line would be. The corpus is unanimous on that: all four
+enums with values are broken and all nine bare-name ones without an interior
+comment are on one line, and two of the broken ones would fit inside 80
+columns easily. An enum of bare names is a list; an enum of assignments is a
+table.
+
+A value column you built by hand is kept, on the same terms as everywhere
+else. A comment inside forces the broken form, because a comment cannot go on
+one line with the code after it.
 
 **Field declarations.** ``rand bit[64] addr;``, ``mem_c::fill_a f;``,
 ``static const bit[64] BASE = 0x40;`` -- the most common statement in PSS, and
@@ -258,6 +358,34 @@ rather than fixed: a lone declaration keeps the padding its author gave it
 with ``default`` items comes out partly aligned, which is an inconsistency
 awaiting evidence rather than a decision.
 
+**The command line.** ``pssfmt``, with ``-i``, ``--check`` and ``--diff``,
+directory walking, and stdin/stdout. :doc:`cli` documents it. Two things in it
+are worth more attention than the flags: the exit codes separate *"the answer
+is no"* from *"I could not compute the answer"*, and ``-i`` writes a sibling
+file and renames it over the target, so an interrupted run leaves either the
+old file or the new one and never a truncated one. It is the only operation in
+the project that destroys information.
+
+**The emit boundary.** The tail of a formatted file -- everything after the
+last code token -- is *copied* rather than composed, because no construct owns
+it. Until it had a pass of its own, every file-level property held for every
+line of the output except the last one: a CRLF file came back with LF
+everywhere and CRLF on the final line, trailing whitespace survived on the last
+line only, and trailing blank lines outlived a blank-line limit that collapsed
+them everywhere else. None of it was visible from the corpus, which contains
+no CRLF file, no file ending in whitespace and no file ending in a blank line.
+``insert_final_newline`` and ``line_ending`` had been options that nothing
+read.
+
+Line endings are now normalised on the way in and applied on the way out, so
+no rule and no measurement ever sees a ``\r``. That direction matters: a
+multi-line ``/* */`` comment is a *single token* whose text spans lines, so
+converting line endings by substituting over finished output rewrites token
+text -- which the verifier correctly calls corruption. The verifier grants one
+narrow exemption for this, and only this: token text is compared with line
+endings normalised. A dropped comment, an altered one, a merged token or a
+deleted byte all still fail.
+
 **The style policy.** Those measurements now exist as values a rule can ask
 for, per construct, rather than as numbers a rule would otherwise write
 inline. That matters less for what ``pssfmt`` does today than for what it can
@@ -276,25 +404,33 @@ Not built yet
    * - Piece
      - What is missing
    * - **Style rules**
-     - Most of them. Declarations, their bodies and their headers are
-       formatted, as are ``extend`` blocks, ``import`` statements, field
-       declarations, expressions, constraints, activities and template
-       arguments; procedural statements, ``exec`` bodies, function prototypes,
-       coverage, ``compile if``, annotations and template *parameter*
-       declarations are not, and are reproduced exactly until they are.
+     - Fewer than there were. Declarations, their bodies and their headers
+       are formatted, as are ``extend`` blocks, ``import`` statements, field
+       declarations, ``enum`` declarations, expressions, constraints,
+       activities, template arguments, functions -- body, header, parameter
+       list and the statements inside -- and native ``exec`` bodies;
+       ``if``/``else`` and the loop statements, coverage, ``compile if``,
+       annotations, ``monitor`` blocks and template *parameter* declarations
+       are not, and are reproduced exactly until they are. Of what remains,
+       most is either one construct in one corpus file or a rule deliberately
+       waiting on evidence -- ``pool [4]`` is the clearest, where the corpus
+       and the measured bracket rule disagree and neither has been overruled.
        Expressions *inside* those constructs are reproduced with them: a rule
-       cannot lay out a node whose parent has no rule. That is not a small
-       caveat -- 13 of the corpus's 137 template argument lists go unformatted
-       for exactly this reason, sitting inside ``exec`` bodies and function
-       parameter lists.
+       cannot lay out a node whose parent has no rule. That was a large caveat
+       and is now a small one -- it accounted for 13 of the corpus's 137
+       template argument lists, then 10 once parameter lists had a rule, and
+       none once ``exec`` bodies did. Each time, writing one rule made lists
+       elsewhere reachable with nothing written for them.
    * - **Command line**
-     - ``pssfmt -i``, ``--check``, ``--diff``, ``--lines``. See
-       :doc:`quickstart` for the intended interface.
+     - ``--dump-config``, and a ``--diff-only`` mode that formats just the
+       lines a ``git diff`` touched -- which is ``--lines`` plus a diff
+       parser. ``--lines`` and ``--explain`` are built. See :doc:`cli`.
    * - **Configuration**
-     - The ``.pssfmt`` file, named base styles, per-glob overrides.
+     - Named base styles, ``extends``, and per-glob overrides. The ``.pssfmt``
+       file itself is built; see :doc:`configuration`.
    * - **Escape hatches**
-     - ``.pssfmtignore``, for skipping whole files by glob. The three
-       in-file directives are built; see above.
+     - Nothing. ``.pssfmtignore`` and the three in-file directives are built;
+       see above and :doc:`configuration`.
    * - **Editor integration**
      - Format-on-save and format-selection through the PSS language server.
 

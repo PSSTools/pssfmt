@@ -35,7 +35,9 @@ import pytest
 
 pytest.importorskip("pssparser")
 
+from pssfmt.finish import finish  # noqa: E402
 from pssfmt.rules import REGISTRY, format_source  # noqa: E402
+from pssfmt.style import DEFAULT_STYLE  # noqa: E402
 from pssfmt.verbatim import verbatim_lines  # noqa: E402
 from pssfmt.verify import format_safely  # noqa: E402
 from support import (CORPUS_ROOT, CORPUS_SOURCE, corpus_files,  # noqa: E402
@@ -93,11 +95,87 @@ REFORMATTED = {
     # measurement rather than an anecdote.
     "language-ref/extension_variants.pss",
     "language-ref/flow_basic.pss",
+    # ``P3-11a``, and the whole of what function headers move in this corpus
+    # is six lines across two files. Two of them are here, and each is a
+    # measured majority applied to a construct that was simply not being
+    # written out before::
+    #
+    #     import target C function int  sample_dut();   ->  int sample_dut()
+    #     function int demo(array<int,8> a, int n)      ->  array<int, 8>
+    #
+    # The first is the corpus's *only* padded name column in 150 prototypes
+    # (149 write one space), and it is the reason this item emits no column
+    # stop there: a stop would let ``infer`` keep it, and one voice does not
+    # decide a site. The second is ``Site.COMMA`` at 355/362, reaching a
+    # template argument list inside a parameter list for the first time.
+    #
+    # ``P3-11b`` adds four more lines to this file, and three of them are one
+    # finding rather than three changes: **a column stop that does not line up
+    # costs a column that did.** ``infer`` requires every marked column in a
+    # block to agree, so a line that gains a stop it cannot satisfy flushes
+    # the whole line -- including a column the author really had::
+    #
+    #     p.x = a;      // visible to the caller: p is a handle
+    #     a = 0;        // NOT visible to the caller: a is a copy
+    #
+    # Those two align their *comments*; the ``=`` stop this item adds does not
+    # line up (``p.x `` is 4 columns, ``a `` is 2), so both columns go. Kept
+    # rather than worked around, because the alternative is not adding the
+    # stop -- and that stop is what saves five larger tables in four other
+    # files. ``P3-11c`` is the note for per-column alignment, which is what
+    # would let both survive.
+    #
+    # The fourth is a table this item breaks *by improving a line inside it*:
+    # ``[8,16,32]:`` becomes ``[8, 16, 32]:`` and is now a column wider than
+    # the arm above it, so the match block no longer lines up and is flushed.
+    "language-ref/procedural_realization.pss",
+    # The fifth kind, added by ``P3-11``: a function body written on one line.
+    #
+    #     function bit[32] ch_addr(int ch) { return base_addr + ch * 0x20; }
+    #
+    # The only one of the corpus's 118 functions written that way, and the
+    # only file `P3-11` moves at all -- the other 117 are already open, which
+    # is why the rule opens it rather than collapsing the rest. Identical
+    # decision to ``P3-5``'s for constraint blocks, on identical evidence.
+    "language-ref/resource_arbitration.pss",
     # ``P3-5``, and the only file constraints move at all -- the other 51
     # constraint declarations in the corpus were already written the way the
     # measurement says. See :data:`HOSTILE_BUT_VALID` below for why this one
     # is formatted rather than declined.
     "lexical/escaped_identifiers.pss",
+    # ``P3-11b``, and the eleven files here are one change repeated: these are
+    # generated PeakRDL output, and every one of them writes ``index*0x4``
+    # inside a ``match`` arm. ``Site.MULTIPLICATIVE`` is spaced, and it is one
+    # of the two defaults ``docs/style.rst`` decided by *argument* rather than
+    # by measurement -- the corpus splits, and the split is a code generator
+    # against the humans. So this is that argument's first bill, 27 lines of
+    # it, and the files paying it are the generator's.
+    #
+    # They are here at all because ``match`` got a rule: these arms sat behind
+    # 92 unformatted ``match`` statements, so nothing in them was reachable.
+    "peakrdl/arrays_1d.pss",
+    "peakrdl/arrays_nd.pss",
+    "peakrdl/arrays_nd__index_helpers.pss",
+    "peakrdl/basic.pss",
+    "peakrdl/basic__hier.pss",
+    "peakrdl/basic__no_pure.pss",
+    "peakrdl/deep.pss",
+    "peakrdl/params.pss",
+    "peakrdl/reset.pss",
+    "peakrdl/reset__reset_consts.pss",
+    "peakrdl/wide.pss",
+    # ``P3-8a``, and the only file native ``exec`` bodies move at all -- 28 of
+    # them across 18 files were reproduced verbatim until this item, and 27 of
+    # those files were already written the way the rules produce. What moves
+    # here is one gap, and it is not an ``exec`` decision at all::
+    #
+    #     write32(h,  0xdead_beef);   ->   write32(h, 0xdead_beef);
+    #
+    # ``Site.COMMA`` at 355/362. The author aligned the two arguments of two
+    # adjacent calls, and an argument list carries no column stop -- marking
+    # one would mean deciding that a call's arguments are a table, which two
+    # lines in one file cannot support.
+    "language-ref/regs_and_mem.pss",
     # ``P3-7``, and the only file templates move at all: the other 33 of the
     # 34 files holding a template argument list are byte-identical after being
     # formatted for the first time. That is the real result of the item -- 137
@@ -113,6 +191,23 @@ REFORMATTED = {
     # Two spaces where the neighbouring field has one, and the two declarators
     # are 13 columns apart, so there is no column to keep.
     "peakrdl/scalar_regs__base_address_top.pss",
+    # ``P4-1``, and the only entry that is not a layout decision at all: this
+    # file ends mid-token with no final newline, and the emit boundary now
+    # adds one (``insert_final_newline``, previously a declared option that
+    # nothing read). Every other byte is unchanged, and the file is still
+    # *declined* by every rule -- see ``test_broken_input_is_still_not_mangled``,
+    # which asserts exactly that by comparing against ``finish`` rather than
+    # against the input.
+    "pathological/truncated_mid_token.pss",
+    # Already here before ``P3-11a``; the other four of that item's six lines
+    # are in this file. ``addr_region_s <TRAIT>`` loses its space (the angle
+    # site, 135/137) and ``write8 (`` loses its (147/150 tight) -- the latter
+    # padded to line up with the ``write16(`` below it, which is a column
+    # three-quarters of its own block does not keep.
+    #
+    # What it does *not* move is the point: the two wrapped prototypes at
+    # lines 83 and 85 are declined and reproduced, because joining them is
+    # 92 columns and there is no parameter-list break policy to do better.
     "stdlib/addr_reg_pkg.pss",
     "stdlib/executor_pkg.pss",
     "stdlib/std_pkg.pss",
@@ -207,6 +302,13 @@ def test_broken_input_is_still_not_mangled(path):
     damage, and it is where the tree least resembles the source. Tier 1
     declines to lay out a construct it cannot account for, so these come back
     intact rather than reformatted.
+
+    "Intact" is measured through the emit boundary, which is the difference
+    between *no rule touched this* and *no byte changed*. One pathological
+    file ends with no final newline and gains one; that is a file-level style
+    option doing its job, not a rule guessing at a broken tree, and comparing
+    against :func:`~pssfmt.finish.finish` says so while still failing on any
+    byte a rule moves.
     """
     src = read(path)
     result = format_safely(src, formatter=format_source)
@@ -214,7 +316,7 @@ def test_broken_input_is_still_not_mangled(path):
     if ident(path) == HOSTILE_BUT_VALID:
         return
     if "pathological" in ident(path) or "lexical" in ident(path):
-        assert result.text == src, (
+        assert result.text == finish(src, DEFAULT_STYLE), (
             "%s was reformatted despite being deliberately malformed; Tier 1 "
             "is supposed to decline rather than guess" % ident(path))
 

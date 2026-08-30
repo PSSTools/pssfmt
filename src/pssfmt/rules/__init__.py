@@ -42,8 +42,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
+from ..finish import finish, normalize, resolve_line_ending
 from ..layout import Layout, Verbatim, align_text, render
-from ..style import DEFAULT_STYLE, Style
+from ..style import DEFAULT_STYLE, LineEnding, Style
 from ..trivia import TriviaMap
 from ..verbatim import NO_HATCHES, Hatches, scan_hatches
 from .emit import code_span, span_text
@@ -197,8 +198,17 @@ class Built:
 
 def build_tree(tree: Any,
                style: Style = DEFAULT_STYLE,
-               registry: RuleRegistry = REGISTRY) -> Built:
-    """Formats an already-parsed tree."""
+               registry: RuleRegistry = REGISTRY,
+               trace: Optional[list] = None,
+               watch: Optional[Any] = None) -> Built:
+    """Formats an already-parsed tree.
+
+    :param trace: passed straight to :func:`~pssfmt.layout.engine.render`,
+        which appends one decision per group and one visit per watched node.
+    :param watch: also passed straight through. For ``P4-5``; ``None`` for
+        both means the engine does not know it is being watched, which is the
+        only way an explanation can be trusted to describe the real run.
+    """
     trivia = TriviaMap(tree.tokens, max_blank_lines=style.max_blank_lines)
     ctx = BuildContext(style=style, trivia=trivia, registry=registry,
                        hatches=scan_hatches(trivia))
@@ -208,6 +218,8 @@ def build_tree(tree: Any,
         print_width=style.print_width,
         use_tabs=style.use_tabs,
         tab_width=style.indent_width,
+        trace=trace,
+        watch=watch,
     )
     # Column alignment runs on finished lines, after line breaking, so it can
     # never influence a fit decision -- see ``pssfmt.layout.align``. It is a
@@ -223,7 +235,11 @@ def build_tree(tree: Any,
     # emit it. Dropping it truncates the file -- usually by exactly the final
     # newline, which is the kind of diff that gets committed without comment.
     text += "".join(tok.text for tok in trivia.eof.raw_leading)
-    return Built(text=text, doc=doc, trivia=trivia)
+    # ...and because it is *copied* rather than composed, every file-level
+    # property held for every line but the last one until this call existed.
+    # See `pssfmt.finish`.
+    return Built(text=finish(text, style, trivia.stream), doc=doc,
+                 trivia=trivia)
 
 
 def format_tree(tree: Any,
@@ -242,10 +258,25 @@ def format_source(src: Any,
     :func:`pssfmt.verify.format_safely`, via a one-argument closure. Nothing
     here verifies anything: the fail-safe is a separate layer on purpose, so
     that no rule can be written in a way that quietly bypasses it.
+
+    Line endings are handled entirely at the two ends of this function and
+    nowhere in between -- normalised before the parser sees the text, applied
+    again by the emit boundary. The rule layer has no CRLF handling and needs
+    none as a result; ``pssfmt.finish.normalize`` records what happens without
+    this, which is a raise rather than bad output.
+
+    ``auto`` is resolved here too, for the same reason in reverse. It is a
+    question about the input, and by the time there is a tree the input has
+    been normalised and every file in the world reports LF.
     """
     from pssparser import cst as _cst
 
-    return format_tree(_cst.parse(src), style=style, registry=registry)
+    text = src.decode("utf-8") if isinstance(src, (bytes, bytearray)) else src
+    resolved = style.evolve(
+        line_ending=LineEnding.CRLF
+        if resolve_line_ending(style, text) == "\r\n" else LineEnding.LF)
+    return format_tree(_cst.parse(normalize(text)), style=resolved,
+                       registry=registry)
 
 
 # Registered last, and by an explicit call rather than by import side effect:
@@ -255,9 +286,11 @@ def format_source(src: Any,
 from . import activities  # noqa: E402
 from . import constraints  # noqa: E402
 from . import decls  # noqa: E402
+from . import procedural  # noqa: E402
 from . import stmts  # noqa: E402
 
 decls.register(REGISTRY)
+procedural.register(REGISTRY)
 stmts.register(REGISTRY)
 constraints.register(REGISTRY)
 activities.register(REGISTRY)

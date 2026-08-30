@@ -9,8 +9,8 @@ package template_pkg {
 
     struct user_s {
         packed_s<bit[8], 4> small;
-        packed_s<bit[32], 64> large;
-        empty_c<> nothing;
+        packed_s<bit[32], 64>        large;
+        empty_c<>                    nothing;
         nested_s<packed_s<bit, 8>> nested;
     }
 }

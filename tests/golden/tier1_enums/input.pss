@@ -1,0 +1,58 @@
+// Enums: the one body in PSS that is a *list*, and the one that is written
+// on a single line more often than not. Both forms are here, and the thing
+// that decides between them is whether the items carry values -- not width.
+
+package enum_pkg {
+
+    // Bare names: one line. Nine of the corpus's ten are written this way,
+    // and the two gaps inside the braces are the first measurement anyone
+    // could take of `BRACE_OPEN.after` and `BRACE_CLOSE.before` -- every
+    // other brace in PSS opens a body that breaks.
+    enum op_mode_e {FAST,SLOW}
+    enum dma_dir_e   {  UNKNOWN ,  IDLE ,   ACTIVE  }
+
+    // Values: one item per line. This one joins to 69 columns, well inside
+    // `print_width` -- so a fit decision would collapse it, and the corpus
+    // says it should not be.
+    enum spi_dir_e : bit[1] {
+        SPI_XFER_WRITE = 0,
+        SPI_XFER_READ  = 1
+    }
+
+    // A hand-built value column, and a base type whose `:` is a fifth
+    // reading of a character `docs/style.rst` splits four ways.
+    enum dma_addr_mode_e:bit[2] {
+        DMA_MEM_TO_MEM  = 0,
+            DMA_MEM_TO_PERI = 1,
+        DMA_PERI_TO_MEM = 0x2
+    }
+
+    // A near-miss rather than a table: `infer` flattens it.
+    enum ragged_e : bit[4] {
+        A      = 0,
+        BBBBBBBB   = 1
+    }
+
+    // Bare names with a comment inside. The comment is what breaks it -- the
+    // inline form is one `emit_span` call, and that refuses a span holding a
+    // comment. The comment after a comma belongs to the item before it.
+    enum mem_pattern_e {
+        MEM_PATTERN_ZERO,       // all words zero
+        // Reproducible, so check() can recompute it.
+        MEM_PATTERN_PRAND,
+        MEM_PATTERN_UNKNOWN
+    }
+
+    // An empty body stays tight, like every other empty body.
+    enum nothing_e {   }
+
+    // A trailing `;` is a sibling of the enum, not part of it, and merges
+    // onto the line it terminates.
+    enum terminated_e {A,B} ;
+
+    // Switched off: frozen byte for byte.
+    // pssfmt off
+    enum frozen_e {A,   B,
+                   C}
+    // pssfmt on
+}

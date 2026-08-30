@@ -92,6 +92,56 @@ The layer boundaries
 ``src/pssfmt/style.py``
     The seam between the two. The one module that knows a default.
 
+``src/pssfmt/config.py`` and ``src/pssfmt/ignore.py``
+    *How* to format and *what* to format, kept apart because they resolve by
+    opposite rules and each rule is wrong for the other. Configuration stops
+    at the first file found; ignore files stack from the repository root down.
+
+    A configuration is a set of **values**, and merging values makes "which
+    file set this?" unanswerable by reading -- so the chain is not merged, and
+    composing two files is a separate, explicit feature. An ignore file is a
+    set of **rules**, which compose by construction: ``!`` exists precisely so
+    an inner file can overrule an outer one, and refusing to stack them would
+    make a subdirectory's ignore file silently disable the repository's.
+
+    Exposing an option is where those two modules meet the rest of the
+    pipeline, and it carries an obligation worth stating architecturally: **a
+    key the configuration accepts is a promise, so the last step before
+    exposing one is finding the code that keeps it.** Two of the twelve keys
+    had no such code when the config layer was written -- one was made real,
+    one is refused -- and a test asserts of every remaining key that setting
+    it changes real formatter output. The alternative is not a missing
+    feature, it is a tool that accepts an intention and then disagrees with
+    it silently, which is strictly worse than not offering the option.
+
+``src/pssfmt/ranges.py``
+    Formatting *part* of a file. The whole file is always formatted -- a line
+    range is not a syntactic unit, so it has no tree, and the indentation it
+    should get is a fact about ancestors outside it -- and this module decides
+    how much of the result to keep.
+
+    Which means the output has to be cuttable at a line boundary without
+    cutting through a token, and that is where the design was decided by a
+    measurement rather than by an argument. The obvious implementation asks
+    ``difflib`` for hunks and keeps the overlapping ones; over 92 corpus files
+    at 24 styles, **5768 of 11400 such hunks are not whitespace-only**.
+    ``difflib`` matches lines, and every closing brace on its own line is the
+    same line, so when the line count shifts it pairs one with another and the
+    surrounding hunks straddle real code.
+
+    So the cut points are computed instead. Because the formatter preserves
+    tokens, the file with all whitespace removed is invariant; number each
+    line boundary by how much of that text precedes it, and boundaries with
+    equal numbers are places where both sides have emitted the same thing so
+    far. Cutting there is safe and cutting elsewhere is not.
+
+    The lesson is the one this project keeps relearning from the other side.
+    "The architecture guarantees it" was true -- token preservation is a
+    whole-file property and it holds -- and the guarantee still did not
+    survive being cut up by a tool that does not know what a token is. **A
+    property of an artifact is not automatically a property of its pieces**,
+    and the way to find that out is to count, not to reason.
+
 ``src/pssfmt/verbatim.py``
     What the formatter *copies* rather than composes. Small, and load-bearing
     for a reason worth stating: every claim the tool makes about its own
@@ -161,6 +211,38 @@ The lesson generalises past this floor, to any invariant that a helper
 enforces rather than the type system: *the way to audit it is to enumerate the
 call sites, not to re-read the rule.* Re-reading the rule confirms the rule,
 which was never the thing that was wrong.
+
+The same shape appeared once more, at the other end of the pipeline, and it is
+worth recording because the second instance is where a pattern becomes
+something to look for. Everything a formatter emits is composed -- a rule
+asked for a gap, the engine chose a break, the alignment pass moved a column
+-- except the file's tail. Trivia after the last code token belongs to no CST
+node, so no builder can emit it and the pipeline appends it verbatim. That is
+the right default, since dropping it truncates the file. It also meant every
+*file-level* property was true of every line but the last one: a CRLF file
+came back mixed, trailing whitespace survived where the engine strips it
+everywhere else, and trailing blank lines outlived the limit that clamps them
+in the middle of a file. Two of the three were declared style options that
+nothing read.
+
+So the general form is: **an invariant is audited by enumerating the places
+output is produced, and "the text a rule emitted" is never the only one.**
+Copied text is exactly where properties go to fail, because it arrives without
+having been asked any of the questions the composed text was asked.
+
+Line endings then have to be handled in one specific direction, which is worth
+stating because the obvious alternative fails for a non-obvious reason. They
+are normalised on the way *in* and applied on the way *out*, so no rule, no
+width measurement and no check ever sees a ``\r``. Converting on the way out
+alone does not work: a multi-line ``/* */`` comment and a triple-quoted
+``exec`` template are each a *single token* whose text spans lines, so
+substituting over finished output edits token text -- and the verifier,
+correctly on the evidence available to it, calls that corruption. The
+verifier grants exactly one exemption in return, and its bound is worth being
+precise about: token text is compared with line endings normalised, permitting
+``\r\n`` and ``\n`` to stand for each other and nothing else, anywhere. That
+conversion is byte-level, total, and its own inverse -- checkable without a
+parser, which is why it is allowed to happen outside the part a parser checks.
 
 A rule set that is incomplete on purpose has one failure mode that its own
 tests cannot see, and it is worth naming because it took a while to find. A

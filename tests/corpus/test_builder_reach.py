@@ -68,6 +68,17 @@ NOT_IN_THE_CORPUS = {
     # value form) is reached exactly once, in one file, so this pair is thin
     # in the corpus rather than absent from it.
     "default_disable_constraint",
+    # `break;` and `continue;` -- covered by T-38 (tests/test_statements.py)
+    # and by the tier2_functions golden. The corpus has exactly one of each,
+    # and both are inside the same `if (el == 0) break;`, so they are hidden
+    # by `procedural_if_else_stmt` rather than absent: `P3-11b` declines that
+    # construct until `docs/style.rst` decides where `} else {` goes.
+    #
+    # Worth stating plainly because the two facts are different: these rules
+    # are exercised by real corpus *text*, and by no corpus *dispatch*. That
+    # distinction is the whole reason this file asks two questions.
+    "procedural_break_stmt",
+    "procedural_continue_stmt",
 }
 
 

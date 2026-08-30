@@ -197,6 +197,11 @@ class TestEveryCompositionSite:
     re-reading section 4.4 would have said so -- only enumerating the places a
     token gets composed. If a fourth site appears, it belongs here on the day
     it is written, whether or not anybody has an escaped-identifier bug.
+
+    A fourth appeared, in ``P3-11b``, and it did arrive with its test -- so
+    the instruction above has now been followed once rather than merely
+    written down. ``P3-10a`` still stands: this is a hand-written list of
+    four, which is the shape that goes stale the *next* time.
     """
 
     def test_emit_span(self):
@@ -215,6 +220,26 @@ class TestEveryCompositionSite:
         out = assert_safe("package p {\n    component /* c */ \\esc {\n"
                           "        int x;\n    }\n}\n", style=TIGHT)
         assert "\\esc {" in out, out
+
+    def test_a_match_arm_meets_its_statement(self):
+        """The fourth site, added by ``P3-11b`` on the day it was written.
+
+        A match arm's ``:`` is followed by a statement built by *its own
+        rule*, so the two are composed as layouts rather than emitted as one
+        span -- which puts this outside ``emit_span`` and therefore outside
+        its floor. Deliberately outside: building the statement separately is
+        what keeps ``procedural_return_stmt``'s builder reached for the 195
+        corpus returns that live in an arm.
+
+        Invisible at the default style, because ``Site.COLON_CASE_ITEM``
+        already spaces it. Under ``TIGHT`` the computed gap is zero and only
+        the floor stands between ``\\esc`` and the token in front of it.
+        """
+        out = assert_safe("component c {\n    function void f() {\n"
+                          "        match (n) {\n"
+                          "            [0]: \\esc = 1;\n"
+                          "        }\n    }\n}\n", style=TIGHT)
+        assert ": \\esc" in out, out
 
     def test_declaration_meets_a_stray_semicolon(self):
         """``decls._collect``'s trailing-``;`` merge, at the *default* style.

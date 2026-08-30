@@ -126,10 +126,18 @@ _BIND_VOCABULARY.update({
 _WORD_LIKE = WORD_LIKE | frozenset(_MODIFIERS_AND_TYPES)
 
 
-def _after_a_width_bracket(left: Any, right: Any,
-                           left_site: Any = None, right_site: Any = None) \
+def after_a_width_bracket(left: Any, right: Any,
+                          left_site: Any = None, right_site: Any = None) \
         -> bool:
     """The seam between a type and the name it declares.
+
+    Public since ``P3-11a``, which found the second construct with it:
+    ``function void f(bit[32] addr, array<int, 8> a)`` is a list of
+    declarations, spelled with the same two productions as the field
+    declarations below and needing the same floor on 129 of the corpus's 150
+    prototypes. Shared rather than restated, because a floor that two modules
+    each keep their own copy of is a floor one of them will lose -- which is
+    the whole of ``P3-10``.
 
     Two shapes, and they are asked two different ways on purpose.
 
@@ -197,7 +205,22 @@ def _around_a_bind_wildcard(left: Any, right: Any,
 #: block's -- a ``lock`` line among ``input`` lines contributes one stop where
 #: its neighbours contribute two, so the group's shared column count drops to
 #: one and every line is measured on a cell that has already been collapsed.
-_SEAM_RULES = ("data_instantiation", "flow_object_type", "resource_object_type",
+#:
+#: ``procedural_data_instantiation`` is ``P3-11b``'s, and it is
+#: ``flow_object_type`` all over again: a local variable inside a function body
+#: is the same declaration written with a different production, so through
+#: ``P3-11a`` it got *no* stops and any column an author built in one would be
+#: collapsed the moment the statement started being written out. The corpus has
+#: three of those tables and one of them is in ``T-36``::
+#:
+#:     int      nwords = nbytes / 4;
+#:     bit[32]  expected;
+#:     bit[32]  actual;
+#:
+#: Found the way ``P3-6`` says to find it -- by asking which production the new
+#: construct uses rather than by assuming the seam list covers declarations.
+_SEAM_RULES = ("data_instantiation", "procedural_data_instantiation",
+               "flow_object_type", "resource_object_type",
                "object_ref_field")
 
 
@@ -336,6 +359,18 @@ _FIELD_RULES = (
     "component_data_declaration",
     "action_field_declaration",
     "const_field_declaration",
+    # ``int nwords = nbytes / 4;`` inside a function body (``P3-11b``). A
+    # local variable rather than a field, and registered here anyway because
+    # it is the *same statement*: a data type, a declarator, an optional
+    # initialiser, the same ``]``-meets-a-name seam and the same column stops.
+    # Giving it its own builder in ``rules/procedural.py`` would mean a second
+    # copy of this vocabulary, and the two would agree until the day one of
+    # them was extended.
+    #
+    # It carries no ``;`` -- the grammar makes the terminator a sibling
+    # ``procedural_stmt`` -- and needs none: ``decls._is_trailing_semicolon``
+    # merges it, which is the machinery ``P3-11`` found already in place.
+    "procedural_data_declaration",
 )
 
 
@@ -349,7 +384,7 @@ def register(registry) -> None:
 
     for rule_name in _FIELD_RULES:
         registry.register(
-            rule_name, _make(_FIELD_VOCABULARY, _after_a_width_bracket))
+            rule_name, _make(_FIELD_VOCABULARY, after_a_width_bracket))
 
     # ``bind`` opts out of the tree sites for the same reason it has its own
     # vocabulary: its ``*`` is a wildcard, and a walk that classified operators
@@ -357,6 +392,6 @@ def register(registry) -> None:
     registry.register(
         "object_bind_stmt",
         _make(_BIND_VOCABULARY,
-              lambda *args: (_after_a_width_bracket(*args)
+              lambda *args: (after_a_width_bracket(*args)
                              or _around_a_bind_wildcard(*args)),
               tree_sites=False))

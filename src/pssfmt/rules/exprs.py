@@ -228,6 +228,24 @@ _BRACKET_SITES = {
     "paren_expr": (Site.GROUP_PAREN_OPEN, Site.GROUP_PAREN_CLOSE),
     "cast_expression": (Site.GROUP_PAREN_OPEN, Site.GROUP_PAREN_CLOSE),
     "function_parameter_list": (Site.CALL_PAREN_OPEN, Site.CALL_PAREN_CLOSE),
+    # `function void f(bit[32] addr, int n)` -- the *declaration* of what the
+    # line above calls (``P3-11a``). The same site pair, and that is a
+    # measurement rather than a convenience: ``tools/style_survey.py`` counts
+    # ``callee -> '('`` lexically, as any name followed by ``(`` that is not a
+    # control keyword, so its 241/244 already *includes* all 150 corpus
+    # prototypes -- 147 of which are tight, which is where three of the four
+    # dissenters come from. There is one measurement here, not two.
+    #
+    # Worth stating because the opposite call was made for ``GROUP_PAREN``:
+    # there the corpus measures a grouping paren separately from a call, and
+    # the numbers agreeing did not make the decisions one. Here the survey
+    # cannot tell them apart, so splitting the site would mean inventing a
+    # second default from the first one's evidence. clang-format does split
+    # them (``SpaceBeforeParensOptions.AfterFunctionDeclarationName``); the day
+    # this corpus can say something about that split is the day to add the
+    # site, and it is a survey change first.
+    "function_parameter_list_prototype": (Site.CALL_PAREN_OPEN,
+                                          Site.CALL_PAREN_CLOSE),
     # `x in [1..4096]` (``P3-5``). The one bracket in PSS written with a space
     # before it, which is why it is not the index bracket it looks like.
     "in_expression": (Site.SET_BRACKET_OPEN, Site.SET_BRACKET_CLOSE),

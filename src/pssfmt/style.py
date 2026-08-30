@@ -141,6 +141,9 @@ class Construct(str, Enum):
     BINS_BODY = "bins_body"
     TEMPLATE_PARAMETER_LIST = "template_parameter_list"
 
+    # -- Tier 2: procedural statements (P3-11b)
+    MATCH_BODY = "match_body"
+
     # -- Tier 3: verbatim (P3-8)
     EXEC_BODY = "exec_body"
 
@@ -341,8 +344,17 @@ DEFAULT_SPACING: Mapping[Site, Spacing] = MappingProxyType({
     # comes from the tree; see `pssfmt.rules.exprs`.
     Site.TEMPLATE_ANGLE_OPEN: Spacing(0, 0),     # before: 135/137; after: 137/137
     Site.TEMPLATE_ANGLE_CLOSE: Spacing(0, 0),    # before: 137/137
-    Site.BRACE_OPEN: Spacing(1, 0),              # before: 725/732
-    Site.BRACE_CLOSE: Spacing(0, 0),
+    # `component c {` and `enum e { A, B }`. The `before` is the one every
+    # declaration exercises. The other two sides were **placeholders until
+    # `P3-12`** and are worth flagging as such: all 733 corpus braces open a
+    # body that breaks, so nothing followed a `{` on the same line and nothing
+    # preceded a `}` -- `BRACE_CLOSE` was referenced by no rule at all. An
+    # inline `enum` is the first construct where either is observable, and it
+    # says spaced: 7 of 10 across 5 files, against 3 in 2 files that are both
+    # the published 3.1 standard library. Five voices to one, which is the
+    # same shape as `MULTIPLICATIVE`'s split and decided the same way.
+    Site.BRACE_OPEN: Spacing(1, 1),              # before: 725/732; after: 7/10
+    Site.BRACE_CLOSE: Spacing(1, 0),             # before: 7/10
 
     Site.COLON_BIT_SLICE: TIGHT,                 # by guide: lowRISC, Verible
     Site.COLON_CASE_ITEM: Spacing(0, 1),         # 214/224

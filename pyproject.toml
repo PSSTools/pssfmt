@@ -17,22 +17,44 @@ authors = [
 ]
 keywords = ["pss", "accellera", "formatter", "verification", "eda"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    # Alpha, not Pre-Alpha: the pipeline is complete end to end and carries a
+    # checked safety contract, but the rule set is deliberately partial and
+    # constructs are still being added, which is what Beta would claim is done.
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Text Processing :: Filters",
 ]
-# Deliberately empty. pssfmt needs pssparser's tokenizer at runtime, but the
-# token/CST API it needs does not exist yet (PLAN.md Phase U, Q-2), and
-# pssparser is not on PyPI. Declaring a dependency that cannot be resolved
-# would break `pip install pssfmt` for no benefit. Add `pssparser` here when
-# U-3 lands and a release exists. Until then pssfmt is installed alongside
-# pssparser by ivpm.
+# pssfmt calls pssparser's tokenizer on every file it formats, so this is a
+# real runtime dependency and not an optional one.
+#
+# The floor is 3.0.4, and it is a floor for a specific reason rather than for
+# recency: `pssparser.tokens` -- the lex-without-parse token stream pssfmt is
+# built on -- does not exist in 3.0.2, the newest release on PyPI at the time
+# of writing. `pip install pssfmt` against 3.0.2 fails at import with
+# ModuleNotFoundError, so the version pin is what turns that into a resolver
+# error a user can read.
+#
+# That makes a pssparser release the gate on publishing pssfmt: until >=3.0.4
+# is on PyPI this line cannot resolve, and the documented `pip install pssfmt`
+# is a promise the index cannot keep. Building from a checkout is unaffected --
+# ivpm resolves pssparser from git, and the documented editable install passes
+# --no-deps for exactly that reason.
 #
 # Everything under src/pssfmt/layout/ works with no dependency at all, by
 # design (formatter.md section 10.3, enforced by T-9).
-dependencies = []
+#
+# `tomli` is the one entry, and it is a backport rather than a dependency:
+# `pssfmt.config` reads `.pssfmt` and `[tool.pssfmt]` as TOML, which is stdlib
+# `tomllib` from 3.11 and needs the backport on the two older interpreters
+# this package still supports. It is not imported unless a configuration file
+# is actually found, and T-9's zero-dependency promise covers
+# `src/pssfmt/layout/`, which does not reach it.
+dependencies = [
+    "pssparser>=3.0.4",
+    "tomli>=1.1.0; python_version < '3.11'",
+]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -43,13 +65,12 @@ dynamic = ["version"]
 test = ["pytest>=8.0", "tomli>=1.1.0; python_version < '3.11'"]
 docs = ["sphinx>=7.0", "myst-parser", "furo"]
 
-# The console script lands with the CLI (PLAN.md P4-1):
-#
-#   [project.scripts]
-#   pssfmt = "pssfmt.cli:main"
-#
-# Declared now it would install a `pssfmt` command that raises ImportError on
-# every invocation, which is a worse answer than the command not existing.
+[project.scripts]
+# `run`, not `main`: main returns an exit code so that tests can drive the real
+# entry point rather than a testable copy of it, and console_scripts treats a
+# non-None return value as an error *message*. `run` is the two-line shim that
+# turns the code into sys.exit.
+pssfmt = "pssfmt.cli:run"
 
 [project.urls]
 # No Source URL: git.dvkit.org serves git clones, not browsable pages, and a

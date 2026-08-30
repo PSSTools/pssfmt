@@ -23,6 +23,7 @@ pytest.importorskip("pssparser")
 
 from pssparser import cst  # noqa: E402
 
+from pssfmt.finish import finish  # noqa: E402
 from pssfmt.layout import Verbatim, render, text  # noqa: E402
 from pssfmt.rules import (  # noqa: E402
     REGISTRY,
@@ -41,10 +42,11 @@ pytestmark = pytest.mark.unit
 #: deliberately absent -- ``decls`` looks *through* them rather than
 #: registering them, so that one node owns each byte of trivia.
 #:
-#: ``import_function`` (``import target function read;``) is likewise absent:
-#: it is a different grammar rule from ``import_stmt`` and is reproduced as
-#: written. So is ``component_pool_declaration`` -- see ``rules/stmts.py`` on
-#: why ``pool [4]`` is not this module's spacing question to answer.
+#: ``component_pool_declaration`` is absent for a different reason -- see
+#: ``rules/stmts.py`` on why ``pool [4]`` is not this module's spacing question
+#: to answer. ``import_function`` was absent alongside it until ``P3-11a``:
+#: it is a different grammar rule from ``import_stmt``, and what it needed was
+#: not the import vocabulary but the *prototype* one.
 SHIPPED = {
     "compilation_unit",
     "package_declaration",
@@ -83,6 +85,44 @@ SHIPPED = {
     # corpus's 92 files open an `extend`, and everything inside one was
     # unreachable until it was registered.
     "extend_stmt",
+    # P3-11, and the same lesson at the largest scale it occurs: 118 functions
+    # across 46 of the 92 files, with everything inside every one of them
+    # unreachable. Registered for the *body*; the header and the statements
+    # inside it are separate vocabularies and separate items.
+    "procedural_function",
+    # P3-11a, the header. Three productions carry a `function_prototype` and
+    # one vocabulary covers all three, but only the first is a *block* -- a
+    # function with no body is a statement, so `_block` would have reproduced
+    # it whole and these two were unreachable through `P3-11`.
+    "function_decl",
+    "import_function",
+    # P3-11b, the statements inside a body. Six leaves plus `match`, which is
+    # not a leaf and is here anyway: 92 of them across 30 files were hiding
+    # 195 of the corpus's 201 `return` statements, so registering the leaves
+    # alone would have bound six builders that dispatch almost never reached.
+    #
+    # `procedural_data_declaration` is registered in `rules/stmts.py` with the
+    # field declarations it is one of, not here.
+    "procedural_return_stmt",
+    "procedural_assignment_stmt",
+    "procedural_void_function_call_stmt",
+    "procedural_break_stmt",
+    "procedural_continue_stmt",
+    "procedural_yield_stmt",
+    "procedural_match_stmt",
+    "procedural_match_choice",
+    "procedural_data_declaration",
+    # P3-8a, and it is one rule because P3-11b landed first: an exec body is a
+    # function body with a different header, and `exec_stmt` is
+    # `procedural_stmt`. `target_code_exec_block` is deliberately absent --
+    # that is P3-8's verbatim kind, and reaching the wrapper over both does
+    # not change it.
+    "exec_block",
+    # P3-12, and the first body in the rule set that is a *list*: an enum's
+    # members are separated by a `,` the parent owns, where every other body's
+    # members terminate themselves.
+    "enum_declaration",
+    "enum_item",
 }
 
 
@@ -128,11 +168,20 @@ class TestTheEmptyRuleSetChangesNothing:
     If this ever fails, the fallback is not the null formatter's emission and
     the incremental-adoption argument collapses -- because every construct
     without a rule is riding on it.
+
+    "Nothing" here means *no rule moved anything*, which is not the same as
+    "the bytes are identical" and stopped being spelled that way in ``P4-1``.
+    ``insert_final_newline`` and ``line_ending`` are file-level style options
+    that were always meant to change files and did not, so every assertion
+    below now compares against the input **through the emit boundary**
+    (:func:`pssfmt.finish.finish`). That is a projection, so the assertions
+    are exactly as strong as before -- and true, which they were not.
     """
 
     @pytest.mark.parametrize("src", SAMPLES.values(), ids=list(SAMPLES))
     def test_output_is_the_input(self, src: str):
-        assert format_source(src, registry=RuleRegistry()) == src
+        assert (format_source(src, registry=RuleRegistry())
+                == finish(src, DEFAULT_STYLE))
 
     @pytest.mark.parametrize("src", SAMPLES.values(), ids=list(SAMPLES))
     def test_it_agrees_with_the_null_formatter(self, src: str):
@@ -145,17 +194,21 @@ class TestTheEmptyRuleSetChangesNothing:
         """
         from pssfmt.null import format_null
 
-        assert format_source(src, registry=RuleRegistry()) == format_null(src).text
+        assert (format_source(src, registry=RuleRegistry())
+                == finish(format_null(src).text, DEFAULT_STYLE))
 
-    def test_a_style_change_cannot_move_a_byte_while_no_rule_exists(self):
+    def test_the_only_thing_a_style_change_can_move_is_the_emit_boundary(self):
         """No rule means nothing consults the policy, so nothing may react to it.
 
         A narrow ``print_width`` that reflowed something here would mean some
-        path is laying out rather than reproducing.
+        path is laying out rather than reproducing. The emit boundary is the
+        one place the style reaches with no rule involved, and naming it is a
+        stronger claim than the blanket one this replaced.
         """
         src = SAMPLES["hand-aligned block"]
         cramped = Style(print_width=20, indent_width=8, use_tabs=True)
-        assert format_source(src, style=cramped, registry=RuleRegistry()) == src
+        assert (format_source(src, style=cramped, registry=RuleRegistry())
+                == finish(src, cramped))
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +354,8 @@ class TestErrorNodesAreNeverFormatted:
         for src in ("package p { int x = ; }\n",
                     "component {{{ \n",
                     "package p {\n    int x = 1\n}\n"):
-            assert format_source(src, registry=RuleRegistry()) == src
+            assert (format_source(src, registry=RuleRegistry())
+                    == finish(src, DEFAULT_STYLE))
 
 
 # ---------------------------------------------------------------------------

@@ -27,8 +27,8 @@ Hand-writing them would test my typing. Generating them without reading them
 would pin whatever the formatter does, including its bugs, which is the
 standard way a golden suite becomes a liability. So the workflow is: generate,
 read every line, and treat anything surprising as a bug report against the
-formatter until it is explained. Three things in the current outputs were
-surprising; one was the bug above, and the other two are documented behaviour
+formatter until it is explained. Five things in the current outputs were
+surprising; one was the bug above, and the other four are documented behaviour
 worth knowing about before you conclude a golden is wrong:
 
 * **A lone declaration keeps the author's padding.** ``bit[4]   priority;``
@@ -40,6 +40,16 @@ worth knowing about before you conclude a golden is wrong:
   comes out partly aligned. That is an inconsistency rather than a decision
   (``P3-5a``), and it is *pinned here on purpose* so that fixing it shows up
   as a golden diff rather than as silence.
+* **A declined header sits above a formatted body.** ``tier2_functions``
+  holds a hand-aligned parameter table whose header is reproduced exactly and
+  whose statements are re-indented anyway. Not two rules disagreeing: a
+  wrapped prototype is ``P3-11a``'s one refusal, and refusing the whole
+  construct instead would have undone ``P3-11`` for every function whose
+  parameters are a table.
+* **Statement spacing is still the author's.** ``int  off = ch * 4;`` keeps
+  its double space inside a body this formatter re-indented, because
+  ``procedural_stmt`` has no vocabulary yet (``P3-11b``). Visible in a golden
+  precisely because every line around it moved.
 
 Regenerating
 ------------
@@ -80,7 +90,7 @@ def test_there_are_cases():
     success. Cheap to assert, and the alternative is a suite that goes quiet
     without failing.
     """
-    assert len(CASES) >= 8, CASES
+    assert len(CASES) >= 10, CASES
 
 
 @pytest.mark.parametrize("case", CASES)

@@ -130,6 +130,41 @@ _PASSTHROUGH = (
     # of the same statement; both are laid out by one builder, registered on
     # the two inner rules rather than on this wrapper.
     "activity_action_traversal_stmt",
+    # ``P3-11b``. Every member of a function body is one of these, wrapping
+    # one of thirteen alternatives -- so until it was here, registering
+    # ``procedural_return_stmt`` bound a builder that dispatch could never
+    # reach. ``T-30`` said so on the first run, which is the third time that
+    # test has been the thing that noticed.
+    #
+    # A lone ``;`` is also a ``procedural_stmt`` and must *not* be looked
+    # through: it has no rule child at all, so the guard below stops on it,
+    # and ``_is_trailing_semicolon`` has already merged it by then anyway.
+    "procedural_stmt",
+    # ``P3-8a``. One wrapper over PSS's three ``exec`` forms, and it was the
+    # reason the frontier census reported ``exec_block_stmt`` as the largest
+    # declined construct: 24 of them, and *none* of them was an exec block --
+    # they were this wrapper, which nothing looked through, so the thing
+    # inside was never asked about.
+    #
+    # The three shapes it resolves to are all handled correctly and only one
+    # of them by a rule: 22 wrap a native ``exec_block``, 2 wrap a
+    # ``target_code_exec_block`` (``P3-8``'s verbatim kind, still reproduced,
+    # deliberately), and 2 are a bare ``;`` with no rule child at all, which
+    # the guard below stops on.
+    "exec_block_stmt",
+    # ...and the wrapper *inside* it, which is a separate omission and was
+    # caught separately. Registering ``exec_block`` reached 28 exec blocks and
+    # unblocked **nothing inside them**: the members of an exec body are
+    # ``exec_stmt``, not ``procedural_stmt``, so every one of the 109
+    # statements in them was still being reproduced while the header and the
+    # indentation moved. A reach census run *with and without* the new rule is
+    # what showed a delta of exactly zero -- the same measurement that found
+    # this wrapper's twin one item earlier.
+    #
+    # ``exec_stmt`` is ``procedural_stmt | exec_super_stmt``. The second is a
+    # bare ``super;`` with a rule of its own and none in the registry, so it
+    # resolves and then reproduces, which is what it did before.
+    "exec_stmt",
 )
 
 
@@ -190,7 +225,7 @@ _HEADER_VOCABULARY = {
     #
     # ``<`` and ``>`` are ``WORD`` here in the sense :mod:`pssfmt.rules.exprs`
     # established -- recognised, but with no answer of their own. Their site
-    # arrives through ``sites_at`` from :func:`_template_sites`, because
+    # arrives through ``sites_at`` from :func:`sites_before`, because
     # ``TOK_LT`` is *also* the comparison operator and the two have opposite
     # measured answers. The completeness check there is what makes admitting
     # them safe: an angle bracket this module cannot account for declines the
@@ -607,8 +642,42 @@ def _hatched(ctx: Any, first: int, last: int) -> Optional[_Member]:
     return _Member(lead.blanks_before, concat(parts))
 
 
-def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
-                                                        List[Tuple[int, int]]]]:
+def _merge_terminal(ctx: Any, members: List[_Member],
+                    spans: List[Tuple[int, int]], at: int) -> bool:
+    """Writes the code token at *at* onto the end of the previous member.
+
+    The shape two constructs share: a terminal that belongs to the member
+    before it rather than being one. ``enum e {A, B};``'s ``;`` is a *sibling*
+    of the enum (``P3-2``), and an ``enum``'s own ``,`` is a separator its
+    parent owns (``P3-12``) -- different grammar reasons, identical treatment.
+
+    ``False`` means the trailing trivia held something this cannot discard,
+    and the caller must decline.
+
+    Written tight, by intent, and the style is not consulted: a terminator is
+    part of what it terminates. Both measurements agree anyway -- ``;`` before
+    a declaration is 1242/1243 tight and an enum's ``,`` is 25/25. The
+    **lexical floor** still applies and is not theoretical here: a recovered
+    fragment can end in an escaped identifier, which swallows a ``;`` written
+    against it (``P3-10``).
+    """
+    code = ctx.trivia.code_indices
+    tail = _trailing(ctx, code[at])
+    if tail is _BAIL:
+        return False
+    token = ctx.trivia.of(code[at]).token
+    prev_last = ctx.trivia.of(code[spans[-1][1]]).token
+    parts = [members[-1].layout,
+             text(" " * floor_gap(0, prev_last, token) + token.text)]
+    if tail is not None:
+        parts.append(tail)
+    members[-1] = _Member(members[-1].blanks_before, concat(parts))
+    spans[-1] = (spans[-1][0], at)
+    return True
+
+
+def _collect(ctx: Any, children: Any, separator: Optional[str] = None) \
+        -> Optional[Tuple[List[_Member], List[Tuple[int, int]]]]:
     """Members and their spans, or ``None`` if this body should not be touched.
 
     This is the one place a body's members are gathered -- declarations,
@@ -634,9 +703,18 @@ def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
     hatch: Any = None
     for child in children:
         if not child.is_rule:
-            # A stray terminal at member level: a separator the grammar puts
-            # here, or error recovery. Either way it is not a member, and
+            # A terminal at member level. *separator* names the one the
+            # grammar puts between members of this body and the caller
+            # therefore expects -- an ``enum``'s ``,`` (``P3-12``) -- and it
+            # joins the member before it. Anything else is a separator nobody
+            # declared or error recovery; either way it is not a member, and
             # guessing at its placement is how a token goes missing.
+            if (separator is not None and child.token is not None
+                    and child.token.type_name == separator and spans):
+                at = ctx.trivia.code_indices.index(child.token_index)
+                if not _merge_terminal(ctx, members, spans, at):
+                    return None
+                continue
             return None
         span = code_span(ctx.trivia, child)
         if span is None:
@@ -663,33 +741,8 @@ def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
         # identity to match against. Clearing it would be a guard no test
         # could distinguish from its absence.
         if _is_trailing_semicolon(ctx, span, spans[-1] if spans else None):
-            tail = _trailing(ctx, ctx.trivia.code_indices[span[1]])
-            if tail is _BAIL:
+            if not _merge_terminal(ctx, members, spans, span[0]):
                 return None
-            # The ``;`` is written tight against what it terminates, by
-            # intent -- this merge does not consult the style at all. The
-            # lexical floor still applies, and here it is not theoretical:
-            # error recovery is one of the two things this merge exists for,
-            # and a recovered fragment can end in an escaped identifier, which
-            # swallows a ``;`` written against it (``P3-10``).
-            #
-            # ``spans[-1][1]`` is the member's last token, which is what the
-            # ``;`` is written against. Reaching for ``[0]`` instead is a
-            # mutant nothing kills, and the measurement says why: across the
-            # corpus and every probe, 42 merges, and the only ones where the
-            # two indices differ are block declarations -- keyword first,
-            # ``}`` last, neither of which the floor has anything to say
-            # about. The floor can only fire on a *single-token* recovered
-            # fragment, where the indices coincide. Correct by argument
-            # rather than by test, so the argument is written down.
-            semi = ctx.trivia.of(ctx.trivia.code_indices[span[0]]).token
-            prev_last = ctx.trivia.of(ctx.trivia.code_indices[spans[-1][1]]).token
-            parts = [members[-1].layout,
-                     text(" " * floor_gap(0, prev_last, semi) + ";")]
-            if tail is not None:
-                parts.append(tail)
-            members[-1] = _Member(members[-1].blanks_before, concat(parts))
-            spans[-1] = (spans[-1][0], span[1])
             continue
         built = _member(ctx, child)
         if built is None:
@@ -699,14 +752,14 @@ def _collect(ctx: Any, children: Any) -> Optional[Tuple[List[_Member],
     return members, spans
 
 
-def _members_of(ctx: Any, node: Any, open_at: int, close_at: int) \
-        -> Optional[List[_Member]]:
+def _members_of(ctx: Any, node: Any, open_at: int, close_at: int,
+                separator: Optional[str] = None) -> Optional[List[_Member]]:
     """The body's members, or ``None`` if this body should not be touched."""
     code = ctx.trivia.code_indices
     open_pos = code.index(node.children[open_at].token_index)
     close_pos = code.index(node.children[close_at].token_index)
 
-    collected = _collect(ctx, node.children[open_at + 1:close_at])
+    collected = _collect(ctx, node.children[open_at + 1:close_at], separator)
     if collected is None:
         return None
     members, spans = collected
@@ -722,8 +775,19 @@ def _members_of(ctx: Any, node: Any, open_at: int, close_at: int) \
     return members
 
 
-def _template_sites(ctx: Any, node: Any, first: int, last: int) -> Any:
-    """Sites for the template arguments in ``first..last``, or ``None``.
+def sites_before(ctx: Any, node: Any, last: int) -> Any:
+    """Tree-decided sites for every rule child of *node* that starts before
+    *last*, or ``None`` to decline the header.
+
+    The general contract first, since ``P3-11a`` gave this a second caller:
+    a header is the run of tokens from a construct's first to the token before
+    its body, it can hold anything the grammar puts there, and the ambiguous
+    ones among those have no answer at the token-type granularity a vocabulary
+    works in. So each child is asked, one at a time, and a child that declines
+    declines the header.
+
+    The rest of this docstring is the *declaration* header, which is where the
+    strictness came from and is still the sharpest case of why it is needed.
 
     Every ``<`` in a declaration header belongs to one of two constructs, and
     they are *not* the same construct written twice:
@@ -761,7 +825,10 @@ def _template_sites(ctx: Any, node: Any, first: int, last: int) -> Any:
     *node* is the whole declaration: its span runs to the closing brace, so
     asking it would let a single declined construct anywhere in the body --
     ``a**2`` is one, and the corpus has it in two files -- refuse the header
-    of the thing containing it. It would be quadratic as well.
+    of the thing containing it. It would be quadratic as well. That is also
+    what ``P3-11a`` needs and could not have got from a whole-node walk: a
+    function body is 300 statements the rule set has no vocabulary for, and
+    every one of them would have refused the prototype above it.
 
     *last* is the ``{`` position, and the bound below is ``>=`` rather than
     ``>`` for a reason worth stating, because ``>`` is what was written first
@@ -791,7 +858,8 @@ def _template_sites(ctx: Any, node: Any, first: int, last: int) -> Any:
 
 
 def _header(ctx: Any, node: Any, open_child: Any,
-            vocabulary: Any = None, sites: Any = None) -> Layout:
+            vocabulary: Any = None, sites: Any = None,
+            separate: Any = None) -> Layout:
     """Everything up to and including ``{``.
 
     Written out token by token when the header uses *vocabulary*, so that
@@ -804,7 +872,7 @@ def _header(ctx: Any, node: Any, open_child: Any,
 
     A template *argument* list is no longer in that set: ``P3-7`` writes
     ``packed_s<bit, 32>`` out, with the angle sites coming from the tree via
-    :func:`_template_sites`. Declining now has a third trigger alongside the
+    :func:`sites_before`. Declining now has a third trigger alongside the
     two above -- an angle bracket that walk could not account for.
 
     *vocabulary* and *sites* exist for ``P3-6``. An activity block's header is
@@ -816,6 +884,22 @@ def _header(ctx: Any, node: Any, open_child: Any,
     closure is load-bearing (see :data:`_HEADER_VOCABULARY` on ``TOK_COLON``).
     Passing the vocabulary in keeps that closure per-caller instead of
     widening one shared set until nothing in it is unambiguous any more.
+
+    A caller that passes a *vocabulary* passes *sites* too, and passing
+    ``None`` there is a **decline** rather than "there are none" -- ``{}`` is
+    how a caller says a header holds nothing the tree has to classify. The
+    two were one value until ``P3-11a`` needed to tell them apart, which is
+    the distinction :data:`_BAIL` exists for one level up: a function whose
+    prototype this module must not touch still has a body it should lay out,
+    so declining the header cannot mean declining the construct.
+
+    *separate* is the caller's extra floor, passed straight to
+    :func:`~pssfmt.rules.tokens.emit_span`. No declaration header needs one --
+    a header ends at ``{``, whose ``before`` is 1 -- and a *prototype* header
+    needs one on almost every line it has: ``bit[32] nbytes`` is a type
+    meeting its declarator, which is the seam
+    :func:`~pssfmt.rules.stmts.after_a_width_bracket` was written for in a
+    field declaration.
     """
     trivia = ctx.trivia
     span = code_span(trivia, node)
@@ -826,12 +910,10 @@ def _header(ctx: Any, node: Any, open_child: Any,
 
     if vocabulary is None:
         vocabulary = _HEADER_VOCABULARY
-        sites = _template_sites(ctx, node, first, brace_pos)
-    elif sites is None:
-        sites = {}
+        sites = sites_before(ctx, node, brace_pos)
 
     emitted = None if sites is None else emit_span(
-        ctx, first, brace_pos, vocabulary, sites_at=sites)
+        ctx, first, brace_pos, vocabulary, separate=separate, sites_at=sites)
     if emitted is not None:
         return emitted
 
@@ -863,8 +945,8 @@ def _header(ctx: Any, node: Any, open_child: Any,
 
 
 def _block(ctx: Any, node: Any, construct: Construct,
-           body: Any = None, vocabulary: Any = None, sites: Any = None) \
-        -> Layout:
+           body: Any = None, vocabulary: Any = None, sites: Any = None,
+           separate: Any = None, separator: Optional[str] = None) -> Layout:
     """A braced declaration: header, indented members, closing brace.
 
     *body* is the node holding the braces, where that is not *node* itself.
@@ -876,7 +958,9 @@ def _block(ctx: Any, node: Any, construct: Construct,
     the ``repeat`` wraps. Everything else here works in *code positions*
     already, so this is the only seam that had to open.
 
-    *vocabulary* and *sites* are passed through to :func:`_header`.
+    *vocabulary*, *sites* and *separate* are passed through to
+    :func:`_header`, and only the header uses them: a body is members, and a
+    member is built by its own rule or reproduced.
     """
     body = node if body is None else body
     braces = _braces(body)
@@ -884,11 +968,12 @@ def _block(ctx: Any, node: Any, construct: Construct,
         return _reproduce(ctx, node)
     open_at, close_at = braces
 
-    members = _members_of(ctx, body, open_at, close_at)
+    members = _members_of(ctx, body, open_at, close_at, separator)
     if members is None:
         return _reproduce(ctx, node)
 
-    header = _header(ctx, node, body.children[open_at], vocabulary, sites)
+    header = _header(ctx, node, body.children[open_at], vocabulary, sites,
+                     separate)
     if not members:
         return concat([header, text("}")])
 
@@ -902,6 +987,174 @@ def _block(ctx: Any, node: Any, construct: Construct,
         hardline(min(blanks, ctx.style.max_blank_lines)),
         text("}"),
     ])
+
+
+#: ``enum spi_mode_e : bit[2] { SPI_MODE_0 = 0, … }`` (``P3-12``).
+#:
+#: A separate vocabulary from :data:`_HEADER_VOCABULARY` and not an addition
+#: to it, because the closure that makes that one's ``TOK_COLON`` unambiguous
+#: is "no span of these tokens can contain a ``[``" -- and an enum's base type
+#: is ``bit[2]``. The colon here is a *fifth* reading of the character
+#: ``docs/style.rst`` splits four ways, and it takes
+#: ``Site.COLON_INHERITANCE`` because that is what it is: the type the enum is
+#: based on, spaced on both sides in all 4 corpus instances, against a rule
+#: measured at 355/358.
+#:
+#: The bracket is safe for the same reason it is safe in a prototype: it
+#: belongs to an ``integer_type``, so its site comes from the tree and no
+#: bit-slice colon can reach here -- ``integer_type``'s width is a
+#: ``constant_expression``, and no expression contains a ``:``.
+_ENUM_VOCABULARY = {
+    "TOK_ENUM": WORD,
+    "ID": WORD,
+    "ESCAPED_ID": WORD,
+    "TOK_COLON": Site.COLON_INHERITANCE,
+    "TOK_LCBRACE": Site.BRACE_OPEN,
+    "TOK_RCBRACE": Site.BRACE_CLOSE,
+    "TOK_COMMA": Site.COMMA,
+    "TOK_SINGLE_EQ": Site.ASSIGN,
+    # The scalar types an enum may be based on, and the literals an item may
+    # be given. The whole corpus inventory, and nothing beyond it.
+    "TOK_BIT": WORD,
+    "TOK_INT": WORD,
+    "DEC_LITERAL": WORD,
+    "HEX_LITERAL": WORD,
+    "OCT_LITERAL": WORD,
+    "BIN_LITERAL": WORD,
+    "TOK_LSBRACE": WORD,
+    "TOK_RSBRACE": WORD,
+}
+
+
+def _enum_items(node: Any) -> List[Any]:
+    return [c for c in node.children
+            if c.is_rule and c.rule_name == "enum_item"]
+
+
+def _has_values(node: Any) -> bool:
+    """Whether any item is written ``NAME = value``."""
+    return any(any(not k.is_rule and k.token is not None
+                   and k.token.type_name == "TOK_SINGLE_EQ"
+                   for k in item.children)
+               for item in _enum_items(node))
+
+
+def _holds_a_comment(ctx: Any, first: int, last: int) -> bool:
+    code = ctx.trivia.code_indices
+    for pos in range(first, last + 1):
+        entry = ctx.trivia.of(code[pos])
+        if any(t.is_comment for t in entry.raw_leading) or \
+                any(t.is_comment for t in entry.raw_trailing):
+            return True
+    return False
+
+
+def _enum_column_stop(ctx: Any, node: Any) -> tuple:
+    """Where a hand-aligned enum puts its column::
+
+        DMA_MEM_TO_MEM  = 0,
+        DMA_MEM_TO_PERI = 1,
+        DMA_PERI_TO_MEM = 2
+
+    The gap before ``=``, which is the same seam ``stmts._column_stops`` marks
+    for a field with an initialiser and ``procedural._assign_stop`` marks for a
+    run of assignments. **3 of the corpus's 11 valued items are padded, and
+    they are two complete tables in two files** -- thinner evidence than the
+    assignments' 22 of 93, and the same shape, so it gets the same answer:
+    mark the seam and let ``infer`` decide. A block whose names happen to be
+    equal width shows no padding, is not read as a table, and comes out at one
+    space either way.
+    """
+    code = ctx.trivia.code_indices
+    span = code_span(ctx.trivia, node)
+    if span is None:
+        return ()
+    for pos in range(span[0], span[1] + 1):
+        if ctx.trivia.of(code[pos]).token.type_name == "TOK_SINGLE_EQ":
+            return (pos,)
+    return ()
+
+
+def _enum_item(ctx: Any, node: Any) -> Layout:
+    """``SPI_MODE_0 = 0`` -- a name, optionally with a value."""
+    span = code_span(ctx.trivia, node)
+    if span is None:
+        return _reproduce(ctx, node)
+    emitted = emit_span(ctx, span[0], span[1], _ENUM_VOCABULARY,
+                        mark_at=_enum_column_stop(ctx, node))
+    return emitted if emitted is not None else _reproduce(ctx, node)
+
+
+def _enum(ctx: Any, node: Any) -> Layout:
+    """``enum e { A, B }`` and ``enum e : bit[2] { A = 0, B = 1 }``.
+
+    The first body in this module that is a **list**: its members are
+    separated by a ``,`` the *parent* owns, where every other body's members
+    terminate themselves. That is why :func:`_collect` grew a *separator* --
+    a terminal at member level was previously always a refusal, which is why
+    an enum declined for ten items and never for a reason anybody chose.
+
+    One line or one item per line, and the corpus decides it unanimously
+    without reference to width:
+
+    ==================================== ===== ==============
+    shape                                count written
+    ==================================== ===== ==============
+    items have ``= value``                 4/4 one per line
+    bare names, no interior comment        9/9 one line
+    bare names + interior comment          1/1 one per line
+    ==================================== ===== ==============
+
+    **Not a fit decision**, and that is the finding. The ten inline enums end
+    at columns 33 to 60, and the five broken ones join to 69, 75, 92, 95 and
+    237 -- so a ``Group`` at ``print_width`` would collapse two of them,
+    including this table::
+
+        enum dma_addr_mode_e : bit[1] {
+            DMA_ADDR_FIXED = 0,
+            DMA_ADDR_INCR  = 1
+        }
+
+    Width gets 13 of 15 right; "does an item have a value" gets 15 of 15. An
+    enum of bare names is a *list* and an enum of assignments is a *table*,
+    and authors write them differently for that reason rather than because of
+    where column 80 falls.
+
+    A comment forces the broken form too, and needs no rule of its own: the
+    inline form is one :func:`~pssfmt.rules.tokens.emit_span` call, and that
+    function has refused a span holding a comment since ``P3-2b``. The one
+    corpus enum in this position is the one the table above counts.
+    """
+    braces = _braces(node)
+    if braces is None:
+        return _reproduce(ctx, node)
+    open_at, close_at = braces
+    span = code_span(ctx.trivia, node)
+    if span is None:
+        return _reproduce(ctx, node)
+
+    if not _enum_items(node):
+        # ``enum e {}``, not ``enum e { }``. The corpus has none, so this is
+        # the house answer rather than a measured one -- and the house answer
+        # is already written down: every empty body in this module stays flat
+        # and tight, because there is nothing to put a space around. Reached
+        # through ``_block``, which says so in one place for all of them.
+        return _block(ctx, node, Construct.ENUM_BODY,
+                      vocabulary=_ENUM_VOCABULARY,
+                      sites=sites_before(ctx, node,
+                                         _brace_pos(ctx, node, open_at)))
+    if not _has_values(node):
+        emitted = emit_span(ctx, span[0], span[1], _ENUM_VOCABULARY)
+        if emitted is not None:
+            return emitted
+    return _block(ctx, node, Construct.ENUM_BODY,
+                  vocabulary=_ENUM_VOCABULARY,
+                  sites=sites_before(ctx, node, _brace_pos(ctx, node, open_at)),
+                  separator="TOK_COMMA")
+
+
+def _brace_pos(ctx: Any, node: Any, open_at: int) -> int:
+    return ctx.trivia.code_indices.index(node.children[open_at].token_index)
 
 
 def _struct_construct(node: Any) -> Construct:
@@ -995,4 +1248,7 @@ def register(registry) -> None:
         body, and all 32 corpus instances indent identically.
         """
         return _block(ctx, node, Construct.EXTEND_BODY)
+
+    registry.register("enum_declaration", _enum)
+    registry.register("enum_item", _enum_item)
 
