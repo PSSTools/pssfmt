@@ -5,6 +5,6 @@ Kept in its own module so ``pyproject.toml`` can read it via
 in pssparser at build time).
 """
 
-_pkg_version = "0.0.1.dev0"
+_pkg_version = "0.1.0"
 
 __version__ = _pkg_version
