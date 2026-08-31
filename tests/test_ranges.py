@@ -32,6 +32,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# ``pssfmt.rules`` reaches ``pssfmt.trivia``, which imports ``pssparser.tokens``
+# at module scope, so this file cannot even be *collected* without the parser.
+# Every other suite that crosses that line skips; this one was the exception,
+# which turned a pssparser-free run into a collection error rather than a skip
+# (T-2 requires the layout suites to pass with pssparser absent, and a
+# collection error in a sibling file stops the whole run).
+pytest.importorskip("pssparser")
+
 from support import corpus_files  # noqa: E402
 
 from pssfmt.ranges import (Edit, LineRange, RangeError, edits,  # noqa: E402

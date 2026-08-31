@@ -276,6 +276,17 @@ class TestParsing:
 class TestTheWalk:
     """``cli.walk``: where the ignore set actually gets used."""
 
+    @pytest.fixture(autouse=True)
+    def _needs_the_parser(self):
+        """``pssfmt.cli`` imports the formatter, so it reaches ``pssparser``.
+
+        Every other suite that crosses that line skips when the parser is
+        absent; this class imported ``cli`` inside each test instead, which
+        turned a pssparser-free run into eight errors rather than eight skips.
+        The walk itself needs no parser -- only the module that hosts it does.
+        """
+        pytest.importorskip("pssparser")
+
     def test_an_ignored_file_is_not_walked(self, tmp_path):
         from pssfmt import cli
         (tmp_path / ".git").mkdir()

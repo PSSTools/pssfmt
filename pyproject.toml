@@ -29,18 +29,30 @@ classifiers = [
 # pssfmt calls pssparser's tokenizer on every file it formats, so this is a
 # real runtime dependency and not an optional one.
 #
-# The floor is 3.0.4, and it is a floor for a specific reason rather than for
+# The floor is 3.0.6, and it is a floor for a specific reason rather than for
 # recency: `pssparser.tokens` -- the lex-without-parse token stream pssfmt is
 # built on -- does not exist in 3.0.2, the newest release on PyPI at the time
-# of writing. `pip install pssfmt` against 3.0.2 fails at import with
-# ModuleNotFoundError, so the version pin is what turns that into a resolver
-# error a user can read.
+# this line was first written. `pip install pssfmt` against 3.0.2 fails at
+# import with ModuleNotFoundError, so the version pin is what turns that into a
+# resolver error a user can read.
 #
-# That makes a pssparser release the gate on publishing pssfmt: until >=3.0.4
-# is on PyPI this line cannot resolve, and the documented `pip install pssfmt`
-# is a promise the index cannot keep. Building from a checkout is unaffected --
-# ivpm resolves pssparser from git, and the documented editable install passes
-# --no-deps for exactly that reason.
+# 3.0.6, not 3.0.4: 3.0.4 and 3.0.5 exist as versions on PyPI but carry **no
+# files** -- no wheel, no sdist -- so `>=3.0.4` and `>=3.0.6` resolve to exactly
+# the same thing today. Naming the version that can actually be installed is
+# what keeps the comment above true; a floor pip cannot satisfy is a floor that
+# documents nothing.
+#
+# That made a pssparser release the gate on publishing pssfmt. **Closed
+# 2026-08-31**: 3.0.6 is on PyPI with cp39-cp314 manylinux wheels, so this line
+# resolves and the documented `pip install pssfmt` is a promise the index can
+# keep. Building from a checkout is unaffected -- ivpm resolves pssparser from
+# git, and the documented editable install passes --no-deps for exactly that
+# reason.
+#
+# Wheels only, no sdist: an interpreter or platform with no matching wheel
+# fails at install time rather than falling back to a source build that needs
+# ANTLR and a C++ toolchain. That is the better failure, and CI's matrix is
+# what keeps the supported set honest.
 #
 # Everything under src/pssfmt/layout/ works with no dependency at all, by
 # design (formatter.md section 10.3, enforced by T-9).
@@ -52,7 +64,7 @@ classifiers = [
 # is actually found, and T-9's zero-dependency promise covers
 # `src/pssfmt/layout/`, which does not reach it.
 dependencies = [
-    "pssparser>=3.0.4",
+    "pssparser>=3.0.6",
     "tomli>=1.1.0; python_version < '3.11'",
 ]
 dynamic = ["version"]
@@ -63,7 +75,13 @@ dynamic = ["version"]
 # under src/ reads TOML, and the layout engine's zero-dependency promise (T-9)
 # is unaffected by what the test extra pulls in.
 test = ["pytest>=8.0", "tomli>=1.1.0; python_version < '3.11'"]
-docs = ["sphinx>=7.0", "myst-parser", "furo"]
+# `pygments-pss` is not a nicety here: docs/conf.py registers `sphinx_pss` only
+# when it is importable, and without a `pss` lexer every `.. code-block:: pss`
+# raises "Pygments lexer name 'pss' is not known" -- which `sphinx-build -W`
+# (T-10, D-16) turns into a failed build. The extra has to carry whatever makes
+# the documented build command succeed, and this is that. sphinx-pss itself is
+# an ivpm dev dependency and is not on PyPI, so it stays optional.
+docs = ["sphinx>=7.0", "myst-parser", "furo", "pygments-pss>=0.1.0"]
 
 [project.scripts]
 # `run`, not `main`: main returns an exit code so that tests can drive the real

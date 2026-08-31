@@ -1,13 +1,25 @@
 # X-3 -- continuous integration.
 #
-# Today every job runs without pssparser, because everything that exists today
-# runs without pssparser: the layout engine takes no dependencies by design
-# (formatter.md section 10.3) and the boundary test proves it still does.
+# 2026-08-31: pssparser 3.0.6 is on PyPI, carrying `pssparser.tokens` (U-1..U-4),
+# so `pip install -e ".[test]"` now resolves the real parser and the corpus
+# round-trip sweep (T-5) runs here for the first time. That closes the last
+# prerequisite Q-9 was tracking; the gate is no longer a TODO in this file.
 #
-# The gates that PLAN.md marks **required** -- the corpus round-trip (T-5) and
-# the mutation-invariance fuzz (T-8) -- are not here yet because they need the
-# upstream token API (Phase U). They are listed as TODO rather than omitted so
-# that a green build is not mistaken for a complete one.
+# Two things follow from that, and both are jobs below rather than comments:
+#
+# * Nothing may *skip* its way to green. Every corpus suite guards itself with
+#   `importorskip("pssparser")`, which is the right behaviour for a developer
+#   machine and the wrong behaviour for a required check -- a job that skips is
+#   worse than a job that is absent, because it appears in the checks list and
+#   reads as proof. `Prove the parser is present` is what makes that
+#   impossible: if the wheel ever stops resolving, the job goes red at a step
+#   that names the reason instead of quietly sweeping nothing.
+#
+# * The layout engine's zero-dependency promise stopped being tested for free.
+#   Before pssparser was installable, *every* job here ran without it, so T-2
+#   held by accident. Now that it is a resolved runtime dependency it is in
+#   every environment, and the promise needs a job that deliberately removes it
+#   -- `layout-without-the-parser`.
 
 name: CI
 
@@ -37,12 +49,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[test]"
+
+      - name: Prove the parser is present
+        # pssparser publishes wheels only -- no sdist -- so a matrix leg with no
+        # matching wheel fails at `pip install` above rather than here. What
+        # this step catches is the subtler case: an install that succeeded but
+        # left the module unimportable (a wheel built for a different ABI, a
+        # broken extension), which `importorskip` would turn into a green run
+        # over zero corpus files. The version is echoed because the next person
+        # reading a corpus failure needs to know which parser produced it.
+        run: python -c "import pssparser; print('pssparser', pssparser.__version__)"
+
       - name: Fetch the corpus
-        # Not the T-5 gate -- that needs pssparser, which no job here installs,
-        # so the sweeps themselves still skip (T-2). What this buys is that the
-        # *presence* guard runs for real: since C-8 the suite fails rather than
-        # skips when the corpus is absent, so without this step `pytest -m "not
-        # slow"` goes red at test_the_corpus_is_present in every matrix leg.
+        # Since pssparser resolves, this is now the T-5 gate's other half: the
+        # sweeps run for real over whatever this clone brings. The presence
+        # guard (C-8) fails rather than skips when the corpus is absent, so the
+        # `-ge 50` check here is belt-and-braces against a clone that succeeds
+        # and yields an empty or truncated tree.
         #
         # Failing loudly on a clone error, with the reason named, is the point.
         # The URL is the GitHub mirror, matching ivpm.yaml (per-repo consistency
@@ -62,8 +85,43 @@ jobs:
           echo "corpus: $n .pss files"
           test "$n" -ge 50
 
-      - name: Unit and layout tests
+      - name: Unit, layout, trivia, golden, CLI and corpus tests
+        # One invocation on purpose: the corpus sweep (T-5) is not a separate
+        # job because it is not separately runnable -- it is the same suite,
+        # and splitting it would mean installing and cloning twice to report
+        # the same failures under two names.
         run: pytest -m "not slow" -q
+
+  layout-without-the-parser:
+    name: layout engine, pssparser absent (T-2, T-9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install without dependencies
+        # --no-deps is the whole job: pssparser is a declared runtime
+        # dependency, so any ordinary install brings it and the claim that the
+        # layout engine works without it becomes untestable.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-deps -e .
+          pip install "pytest>=8.0"
+      - name: Prove the parser is absent
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          if importlib.util.find_spec("pssparser") is not None:
+              sys.exit("pssparser is installed; this job proves nothing as written")
+          print("pssparser absent, as intended")
+          PY
+      - name: Layout, unit and trivia suites
+        # These must PASS, not skip. The rest of the suite skips here by
+        # design, which is why the marker expression is narrow: a run whose
+        # only outcome was "skipped" would be the quiet green this job exists
+        # to rule out.
+        run: pytest -m "layout or unit or trivia" -q
 
   boundaries:
     name: architectural boundaries (T-9, T-13)
@@ -75,13 +133,16 @@ jobs:
           python-version: "3.12"
       - run: |
           python -m pip install --upgrade pip
-          pip install -e ".[test]"
+          pip install --no-deps -e .
+          pip install "pytest>=8.0"
       # Separate job on purpose: this is the check that must not be quietly
       # relaxed, and a dedicated job makes a change to it visible in review.
+      # It is pure source inspection -- it imports neither pssfmt nor pssparser
+      # -- so it installs neither.
       - run: pytest tests/test_boundaries.py -q
 
   docs:
-    name: docs (T-10, D-16)
+    name: docs (T-10, D-16, D-17)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,19 +153,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[docs,test]"
       - name: Build with warnings as errors
+        # The `docs` extra carries pygments-pss for a reason this build finds
+        # immediately without it: every `.. code-block:: pss` raises "Pygments
+        # lexer name 'pss' is not known", and -W turns eight of those into a
+        # failed build. sphinx-pss (the ivpm dev dependency) is a nicer wrapper
+        # but is not on PyPI; docs/conf.py already treats it as optional.
         run: python -m sphinx -b html docs docs/_build/html -W --keep-going
+      - name: The docs tests themselves
+        # T-10 is a *test* (tests/test_docs.py), and it is marked slow, so the
+        # matrix job above deselects it. Without this step the build above runs
+        # but D-17 -- every PSS block in the docs is formatted and checked --
+        # never runs anywhere in CI.
+        run: pytest -m slow -q
 
-  # TODO (T-5): corpus round-trip gate -- 465 cases over 92 files, written and
-  #   green locally. Must be a *required* check once it exists here; it is the
-  #   proof of safety.
-  #
-  #   Two of its three prerequisites are now met. The corpus is a declared ivpm
-  #   dependency (pss-corpus), and it fails rather than skips when absent, so a
-  #   job that fetches it cannot silently sweep nothing. What is missing is
-  #   pssparser: no job here installs it, so `importorskip` would skip the
-  #   whole suite, which is exactly the quiet green this gate exists to
-  #   prevent. It needs a *released* pssparser carrying U-1..U-4 -- PLAN.md
-  #   Q-9, not Q-3. Do not add the job before then: a job that skips is worse
-  #   than a job that is absent, because it appears in the checks list.
-  # TODO (P5-2, T-8): whitespace-mutation invariance over the corpus.
-  # TODO (X-5): pssfmt --check over this repo's own tracked .pss files.
+  # TODO (P5-2, T-8): whitespace-mutation invariance over the corpus. The
+  #   prerequisite that blocked T-5 is gone, so this is now blocked only on the
+  #   suite being written.
+  # TODO (X-5): pssfmt --check over this repo's own tracked .pss files. Note
+  #   that the tracked .pss files are golden-test fixtures, which are frozen
+  #   input by design -- so this needs an exclusion, not just a flag.
