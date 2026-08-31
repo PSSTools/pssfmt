@@ -23,7 +23,12 @@ import pytest
 
 pytest.importorskip("pssparser")
 
-from tests.support import CORPUS_ROOT  # noqa: E402
+# ``from support``, not ``from tests.support``: ``tests/`` is not a package
+# (conftest.py says so, and puts ``tests/`` itself on the path for exactly this
+# import). ``tests.support`` resolved only when the repository root happened to
+# be on sys.path -- which is what ``python -m pytest`` does and what a bare
+# ``pytest`` does not, so this file collected fine locally and failed in CI.
+from support import CORPUS_ROOT  # noqa: E402
 
 pytestmark = [pytest.mark.corpus, pytest.mark.integration]
 
