@@ -53,7 +53,17 @@ def resolve(directory: Path):
 
 def parse(text: str, path: Path = Path("<test>")) -> Style:
     """A ``.pssfmt`` body straight to a Style, bypassing discovery."""
-    import tomllib
+    # `tomllib` is stdlib only from 3.11, and this project supports 3.9 and
+    # 3.10, where `tomli` is the declared backport. `pssfmt.config._parse_toml`
+    # has carried this fallback since it was written; this helper did not, and
+    # nothing said so until the matrix ran for the first time -- the 3.9 and
+    # 3.10 legs had never reached a test, because every job failed at `pip
+    # install` while pssparser was unresolvable. Same shape as `C-9b`, and the
+    # same fallback `tests/support.py` already uses.
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        import tomli as tomllib
     return style_from_table(tomllib.loads(text), path)
 
 
