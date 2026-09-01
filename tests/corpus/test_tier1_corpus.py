@@ -258,7 +258,8 @@ def test_no_file_trips_the_fail_safe(path):
     precisely the file where something went wrong.
     """
     src = read(path)
-    result = format_safely(src, formatter=format_source)
+    result = format_safely(src, formatter=format_source,
+                           allow_dropped_semicolons=True)
     assert result.ok, (
         "%s tripped the fail-safe: %s"
         % (ident(path), result.error or list(result.violations)))
@@ -311,7 +312,8 @@ def test_broken_input_is_still_not_mangled(path):
     byte a rule moves.
     """
     src = read(path)
-    result = format_safely(src, formatter=format_source)
+    result = format_safely(src, formatter=format_source,
+                           allow_dropped_semicolons=True)
     assert result.ok
     if ident(path) == HOSTILE_BUT_VALID:
         return

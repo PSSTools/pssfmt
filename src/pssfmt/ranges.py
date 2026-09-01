@@ -48,6 +48,14 @@ construction**: same non-whitespace characters in, same ones out. That is the
 property ``P4-4`` wanted asserted, obtained by making it true instead of by
 hoping and crashing. :func:`edits` is O(lines) and uses no heuristics.
 
+One option moves that boundary, and exactly one: ``optional_semicolon``
+deletes ``;`` tokens PSS never required, or writes them, so
+``nows(input) == nows(output)`` stops being true of the two texts. It stays true over an alphabet without
+``;`` in it, which is what the *ignore_semicolons* argument threaded through
+:func:`_squeezed`, :func:`edits` and :func:`restrict` switches to. An edit is
+then whitespace **and a possible semicolon** rather than whitespace alone; no
+other character can cross a cut either way.
+
 Where a range cannot be honoured exactly
 ----------------------------------------
 An edit is atomic. If lines 10-20 are asked for and one edit spans 8-25 --
@@ -140,7 +148,8 @@ class Edit:
     new_stop: int
 
 
-def _squeezed(lines: Sequence[str]) -> Tuple[str, List[int]]:
+def _squeezed(lines: Sequence[str],
+              ignore_semicolons: bool = False) -> Tuple[str, List[int]]:
     """The text with all whitespace removed, and where each line boundary
     falls in it. The count list is ``len(lines) + 1`` long.
 
@@ -148,33 +157,62 @@ def _squeezed(lines: Sequence[str]) -> Tuple[str, List[int]]:
     so it covers ``\\r`` -- which matters, since ``line_ending`` conversion is
     a legitimate output difference and rewrites bytes inside multi-line
     comment and template tokens.
+
+    *ignore_semicolons* removes ``;`` as well, for ``optional_semicolon``
+    (:class:`~pssfmt.style.SemicolonMode`). That option is the one thing that
+    can make the output hold a different number of *tokens* than the input --
+    fewer under ``omit``, more under ``require`` -- so the invariant this
+    module is built on, ``squeezed(input) == squeezed(output)``, has to be
+    restated over an alphabet the moving token is not in. It still holds
+    exactly, and in both directions: deleting every ``;`` from two texts that
+    differ only in ``;`` leaves two identical texts, so equal-length prefixes
+    are still the same prefix and a matching boundary pair is still a safe
+    cut.
+
+    What it costs is stated in :func:`edits`.
     """
     parts: List[str] = []
     counts = [0]
     total = 0
     for line in lines:
         for piece in line.split():
+            if ignore_semicolons:
+                piece = piece.replace(";", "")
             parts.append(piece)
             total += len(piece)
         counts.append(total)
     return "".join(parts), counts
 
 
-def edits(before: Sequence[str], after: Sequence[str]) -> Tuple[Edit, ...]:
+def edits(before: Sequence[str], after: Sequence[str],
+          ignore_semicolons: bool = False) -> Tuple[Edit, ...]:
     """The atomic differences between two line lists.
+
+    :param ignore_semicolons: the output is allowed to differ from the input
+        in ``;`` tokens. Set it from the style, and only when that style asks
+        -- see :func:`_squeezed`.
 
     :raises RangeError: if the two sides do not contain the same
         non-whitespace characters. Every caller here has already run the
         verifier, so this cannot fire on a verified format -- it is the
         precondition stated out loud rather than assumed, because everything
         below it is only sound while it holds.
+
+    With *ignore_semicolons* an edit is no longer whitespace-only: it is
+    whitespace **plus** a possible ``;``. That weakens the guarantee this
+    module was written to provide, and only that far -- an edit still cannot
+    move any other character across a cut. It is also not the last line of
+    defence: :func:`pssfmt.cli.apply_ranges` re-verifies the spliced text, so
+    a ``;`` cut out of the middle of an ``exec`` template -- the one place a
+    ``;`` lives inside a token rather than between two -- is caught there and
+    the file is left alone.
     """
     # The *characters* are compared and not just how many there are. Equal
     # counts on two different strings would make every cut point a lie, and
     # the whole construction rests on "equal-length prefixes of one string are
     # the same prefix" -- which needs there to be one string.
-    sa, ca = _squeezed(before)
-    sb, cb = _squeezed(after)
+    sa, ca = _squeezed(before, ignore_semicolons)
+    sb, cb = _squeezed(after, ignore_semicolons)
     if sa != sb:
         raise RangeError("the two texts do not contain the same "
                          "non-whitespace characters; a range cannot be "
@@ -242,7 +280,8 @@ def _selected(edit: Edit, ranges: Sequence[LineRange]) -> bool:
 
 
 def restrict(source: str, formatted: str,
-             ranges: Sequence[LineRange]) -> str:
+             ranges: Sequence[LineRange],
+             ignore_semicolons: bool = False) -> str:
     """*formatted* where *ranges* say so, *source* everywhere else.
 
     With ranges covering the whole file this returns *formatted* exactly, and
@@ -256,7 +295,7 @@ def restrict(source: str, formatted: str,
 
     out: List[str] = []
     cursor = 0
-    for edit in edits(before, after):
+    for edit in edits(before, after, ignore_semicolons):
         # The run between two edits is byte-identical on both sides -- that is
         # what made it not an edit -- so which side it is copied from cannot
         # matter. Taking it from `before` says the right thing about intent:

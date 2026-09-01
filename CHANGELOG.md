@@ -6,6 +6,40 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
+## Unreleased
+
+### Added
+
+- **`optional_semicolon` — the trailing `;` after a declaration is now a style
+  choice, and the default is to omit it.** PSS lets a body item be nothing but
+  a `;`, so `struct s { … };` is a declaration followed by an empty one and
+  the semicolon carries no meaning. Three settings: `"omit"` (the default)
+  drops them, `"preserve"` leaves the author's exactly where they are, and
+  `"require"` writes one after every declaration that can legally take one.
+  Set it in `.pssfmt` or `[tool.pssfmt]`, globally or per construct.
+
+  `omit` and `require` are round-trip inverses on every corpus file, so
+  switching a project between them is reversible.
+
+  **This is a change to a default and it changes the tokens in your file** —
+  the only option that does. Both directions are deliberately narrower than
+  "optional". A semicolon is *removed* only where the grammar proves the
+  member before it already ended *and* that member's last token really is a
+  `;` or `}`, so a required terminator the grammar models as a sibling —
+  `int a[4] = {1, 2};` — stays, as does anything left half-typed. Over the
+  92-file corpus that removes 27 semicolons in 4 files and touches nothing
+  else. A semicolon is *written* only where the grammar admits an empty item
+  beside the member, and only when the whole file parsed cleanly: deleting a
+  token leaves the rest read as before, while inserting one changes how the
+  text after it is read.
+
+  The safety contract holds, with one stated exemption: token equivalence
+  permits semicolons to differ in the one direction the setting moves them,
+  and nothing else to differ. Under `omit` an inserted semicolon still fails;
+  under `require` a dropped one does. One lost from inside a string fails
+  either way, and the output must still parse at least as well as the input
+  did.
+
 ## 0.1.0 — first public release
 
 `pssfmt` formats Accellera PSS source. This is an alpha in the sense the

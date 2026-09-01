@@ -45,7 +45,7 @@ from support import corpus_files  # noqa: E402
 from pssfmt.ranges import (Edit, LineRange, RangeError, edits,  # noqa: E402
                            parse_range, parse_ranges, restrict)
 from pssfmt.rules import format_source  # noqa: E402
-from pssfmt.style import Style  # noqa: E402
+from pssfmt.style import SemicolonMode, Style  # noqa: E402
 from pssfmt.verify import verify  # noqa: E402
 
 
@@ -53,15 +53,37 @@ def nonws(text: str) -> str:
     return "".join(text.split())
 
 
+def program(text: str, style: Style = Style()) -> str:
+    """*text* reduced to what a cut may not move.
+
+    ``nonws`` plus, under ``optional_semicolon = "omit"``, the semicolons that
+    option is allowed to delete -- the same alphabet
+    :func:`pssfmt.ranges._squeezed` reduces to, restated here so the property
+    tests are not checking the implementation against itself.
+    """
+    squeezed = nonws(text)
+    return (squeezed.replace(";", "")
+            if style.rewrites_optional_semicolons() else squeezed)
+
+
 #: Styles chosen to move a lot of text around, because the interesting inputs
 #: to this module are files the formatter changes *heavily*. At the default
 #: style most of the corpus is already formatted and produces no edits at all
 #: -- 42 hunks across 92 files -- which would make a green suite here mean
 #: almost nothing.
+#: The last one keeps its semicolons, so the strict form of every property
+#: below -- the one where an edit really is whitespace and nothing else -- is
+#: still exercised over the whole corpus rather than retired by the default.
 STYLES = (
     Style(),
     Style(print_width=40, indent_width=2),
     Style(print_width=120, indent_width=8, max_blank_lines=0),
+    Style(print_width=40, indent_width=2,
+          optional_semicolon=SemicolonMode.PRESERVE),
+    # ...and this one moves them the *other* way, so the restated invariant is
+    # exercised in both directions rather than only where tokens disappear.
+    Style(print_width=40, indent_width=2,
+          optional_semicolon=SemicolonMode.REQUIRE),
 )
 
 
@@ -301,35 +323,40 @@ class TestTheCorpus:
         out = format_source(source, style=style)
         before = source.splitlines(keepends=True)
         after = out.splitlines(keepends=True)
-        for edit in edits(before, after):
-            assert nonws("".join(before[edit.start:edit.stop])) == \
-                nonws("".join(after[edit.new_start:edit.new_stop])), (
-                    "edit %r in %s is not whitespace-only" % (edit, path.name))
+        drop = style.rewrites_optional_semicolons()
+        for edit in edits(before, after, drop):
+            assert program("".join(before[edit.start:edit.stop]), style) == \
+                program("".join(after[edit.new_start:edit.new_stop]), style), (
+                    "edit %r in %s moves more than whitespace" % (edit, path.name))
 
     @pytest.mark.parametrize("path,style", CASES, ids=_ids(CASES))
     def test_selecting_everything_is_the_full_format(self, path, style):
         source = path.read_text(encoding="utf-8")
         out = format_source(source, style=style)
         n = len(source.splitlines()) or 1
-        assert restrict(source, out, [LineRange(1, n)]) == out
+        assert restrict(source, out, [LineRange(1, n)],
+                        style.rewrites_optional_semicolons()) == out
 
     @pytest.mark.parametrize("path,style", CASES, ids=_ids(CASES))
     def test_selecting_nothing_is_the_input(self, path, style):
         source = path.read_text(encoding="utf-8")
         out = format_source(source, style=style)
-        assert restrict(source, out, []) == source
+        assert restrict(source, out, [],
+                        style.rewrites_optional_semicolons()) == source
 
     @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
     def test_any_partial_selection_preserves_the_program_text(self, path):
         """Four ranges per file, chosen to land on quarter boundaries so they
         cut wherever the file happens to have something interesting."""
         source = path.read_text(encoding="utf-8")
-        out = format_source(source, style=STYLES[1])
+        style = STYLES[1]
+        out = format_source(source, style=style)
+        drop = style.rewrites_optional_semicolons()
         n = max(len(source.splitlines()), 1)
         q = max(n // 4, 1)
         for lo, hi in ((1, q), (q, 2 * q), (2 * q, 3 * q), (3 * q, n)):
-            spliced = restrict(source, out, [LineRange(lo, hi)])
-            assert nonws(spliced) == nonws(source), \
+            spliced = restrict(source, out, [LineRange(lo, hi)], drop)
+            assert program(spliced, style) == program(source, style), \
                 "lines %d:%d of %s lost or gained text" % (lo, hi, path.name)
 
     @pytest.mark.parametrize("path", FILES[::12], ids=lambda p: p.name)
@@ -343,11 +370,15 @@ class TestTheCorpus:
         checks does not vary much by file.
         """
         source = path.read_text(encoding="utf-8")
-        out = format_source(source, style=STYLES[1])
+        style = STYLES[1]
+        out = format_source(source, style=style)
+        drop = style.rewrites_optional_semicolons()
         n = max(len(source.splitlines()), 1)
         for lo, hi in ((1, n // 2 or 1), (n // 2 or 1, n)):
-            spliced = restrict(source, out, [LineRange(lo, hi)])
-            assert verify(source, spliced) == (), \
+            spliced = restrict(source, out, [LineRange(lo, hi)], drop)
+            assert verify(source, spliced,
+                          allow_dropped_semicolons=drop,
+                          allow_added_semicolons=drop) == (), \
                 "lines %d:%d of %s did not verify" % (lo, hi, path.name)
 
     def test_the_corpus_actually_exercises_this(self):
@@ -360,5 +391,6 @@ class TestTheCorpus:
             source = path.read_text(encoding="utf-8")
             out = format_source(source, style=STYLES[1])
             total += len(edits(source.splitlines(keepends=True),
-                               out.splitlines(keepends=True)))
+                               out.splitlines(keepends=True),
+                               STYLES[1].rewrites_optional_semicolons()))
         assert total > 500, "only %d edits across the corpus" % total

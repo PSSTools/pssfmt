@@ -46,9 +46,9 @@ package enum_pkg {
     // An empty body stays tight, like every other empty body.
     enum nothing_e {}
 
-    // A trailing `;` is a sibling of the enum, not part of it, and merges
-    // onto the line it terminates.
-    enum terminated_e { A, B };
+    // A trailing `;` is a sibling of the enum and PSS does not require it,
+    // so the default `optional_semicolon = "omit"` drops it.
+    enum terminated_e { A, B }
 
     // Switched off: frozen byte for byte.
     // pssfmt off

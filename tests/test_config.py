@@ -38,7 +38,8 @@ from pssfmt.config import (  # noqa: E402
 )
 from pssfmt.layout.align import AlignMode, GroupBoundary  # noqa: E402
 from pssfmt.rules import format_source  # noqa: E402
-from pssfmt.style import DEFAULT_STYLE, BraceMode, LineEnding, Style  # noqa: E402
+from pssfmt.style import (DEFAULT_STYLE, BraceMode, LineEnding,  # noqa: E402
+                          SemicolonMode, Style)
 
 
 def write(path: Path, text: str) -> Path:
@@ -204,6 +205,7 @@ class TestEveryOptionDoesSomething:
 
     LONG = "component a {\n    int x = aaaaaaaa + bbbbbbbb + cccccccc + dddddddd;\n}\n"
     BLANKS = "component a {\n    int x;\n\n\n\n    int y;\n}\n"
+    SEMICOLON = "package p {\n    struct s {};\n}\n"
     TABLE = ("component a {\n"
              "    int    x;\n"
              "    bit[8] yy;\n"
@@ -247,6 +249,7 @@ class TestEveryOptionDoesSomething:
         ("max_blank_lines", "max_blank_lines = 0", BLANKS, ""),
         ("insert_final_newline", "insert_final_newline = false", LONG, ""),
         ("line_ending", 'line_ending = "crlf"', LONG, ""),
+        ("optional_semicolon", 'optional_semicolon = "preserve"', SEMICOLON, ""),
         ("alignment", 'alignment = "flush-left"', TABLE, ""),
         ("alignment_group_boundary", 'alignment_group_boundary = "none"',
          BOUNDARY, ""),
@@ -410,7 +413,8 @@ class TestTheSchemaMatchesStyle:
             "version", "style", "extends",
             "print_width", "indent_width", "continuation_indent", "use_tabs",
             "brace_style", "max_blank_lines", "insert_final_newline",
-            "line_ending", "alignment", "alignment_group_boundary",
+            "line_ending", "optional_semicolon",
+            "alignment", "alignment_group_boundary",
             "overrides",
         }
 
@@ -419,6 +423,8 @@ class TestTheSchemaMatchesStyle:
         assert parse('alignment = "preserve"').alignment is AlignMode.PRESERVE
         assert (parse('alignment_group_boundary = "none"')
                 .alignment_group_boundary is GroupBoundary.NONE)
+        assert (parse('optional_semicolon = "require"')
+                .optional_semicolon is SemicolonMode.REQUIRE)
 
     def test_an_empty_table_is_the_default_style(self):
         assert parse("") == DEFAULT_STYLE

@@ -71,7 +71,7 @@ from .explain import explain, report
 from .ignore import IgnoreSet, load_ignores
 from .ranges import LineRange, RangeError, parse_ranges, restrict
 from .rules import format_source
-from .style import Style
+from .style import DEFAULT_STYLE, Style
 from .verify import SafeResult, Violation, format_safely, verify
 
 __all__ = ["main"]
@@ -198,11 +198,15 @@ def run_format(source: str, style: Style) -> SafeResult:
     argument that it writes nothing -- would print a diff of output too broken
     to write, which is worse than not printing one.
     """
-    return format_safely(source, formatter=lambda s: format_source(s, style=style))
+    return format_safely(
+        source, formatter=lambda s: format_source(s, style=style),
+        allow_dropped_semicolons=style.drops_optional_semicolons(),
+        allow_added_semicolons=style.adds_optional_semicolons())
 
 
 def apply_ranges(source: str, result: SafeResult,
-                 ranges: Sequence[LineRange]) -> SafeResult:
+                 ranges: Sequence[LineRange],
+                 style: Style = DEFAULT_STYLE) -> SafeResult:
     """Keep the parts of a successful format that *ranges* asked for.
 
     Verified again, and not because :func:`pssfmt.ranges.restrict` is
@@ -215,12 +219,16 @@ def apply_ranges(source: str, result: SafeResult,
     unchanged" are different claims and only the second one matters.
     """
     try:
-        text = restrict(source, result.text, ranges)
+        text = restrict(source, result.text, ranges,
+                        style.rewrites_optional_semicolons())
     except RangeError as exc:
         violations: Tuple[Violation, ...] = (Violation("range", str(exc)),)
         text = result.text
     else:
-        violations = verify(source, text)
+        violations = verify(
+            source, text,
+            allow_dropped_semicolons=style.drops_optional_semicolons(),
+            allow_added_semicolons=style.adds_optional_semicolons())
         if not violations:
             return SafeResult(text=text, ok=True, _original=source)
     return SafeResult(text=source, ok=False, violations=violations,
@@ -374,7 +382,7 @@ def process(source: str, name: str, args, style: Style,
 
     result = run_format(source, style)
     if result.ok and ranges:
-        result = apply_ranges(source, result, ranges)
+        result = apply_ranges(source, result, ranges, style)
 
     if not result.ok:
         # Printed in every mode, including --check, because a declined file

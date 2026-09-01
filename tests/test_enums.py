@@ -47,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 pytest.importorskip("pssparser")
 
 from pssfmt.rules import REGISTRY, format_source  # noqa: E402
-from pssfmt.style import Site, Spacing, Style  # noqa: E402
+from pssfmt.style import SemicolonMode, Site, Spacing, Style  # noqa: E402
 from pssfmt.verify import format_safely  # noqa: E402
 
 
@@ -124,10 +124,17 @@ class TestTheSeparator:
             "    }",
         ]
 
-    def test_a_trailing_semicolon_still_merges(self):
-        """``enum e {A, B};`` -- the ``;`` is a *sibling* of the enum, and it
-        is the construct the shared merge was written for in ``P3-2``."""
-        assert one("    enum e {A,B} ;") == ["    enum e { A, B };"]
+    def test_a_trailing_semicolon_is_dropped(self):
+        """``enum e {A, B};`` -- the ``;`` is a *sibling* of the enum and PSS
+        does not require it, so the default style does not write it."""
+        assert one("    enum e {A,B} ;") == ["    enum e { A, B }"]
+
+    def test_preserving_it_merges_it_onto_the_line(self):
+        """``preserve`` is the construct the shared merge was written for in
+        ``P3-2``: kept as a member of its own it lands on its own line."""
+        assert one("    enum e {A,B} ;",
+                   Style(optional_semicolon=SemicolonMode.PRESERVE)) == [
+            "    enum e { A, B };"]
 
 
 class TestOneLineOrOnePerLine:
@@ -280,7 +287,8 @@ class TestSafety:
 
     @pytest.mark.parametrize("src", SOURCES)
     def test_the_verifier_accepts_it(self, src):
-        result = format_safely(src, formatter=format_source)
+        result = format_safely(src, formatter=format_source,
+                               allow_dropped_semicolons=True)
         assert result.ok, result.diagnostic()
 
     @pytest.mark.parametrize("src", SOURCES)

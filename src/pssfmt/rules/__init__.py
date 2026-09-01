@@ -143,6 +143,14 @@ class BuildContext:
     ``P3-9`` added the fourth field and it is the third kind, not a new one:
     ``// pssfmt off`` is something the author wrote, in a comment, saying
     which of these rules may run where.
+
+    ``P4-13`` added the fifth, which *is* a new kind, and it is here because
+    exactly one rule needs it. ``optional_semicolon = "require"`` writes a
+    token into the file, and inserting a token changes how everything after it
+    is read -- in a file the parser did not understand, "what comes after"
+    is not a thing anything here knows. So insertion asks first. Deletion does
+    not need to: it is guarded per member by what that member's last token
+    actually was, which is a local question with a local answer.
     """
 
     #: The resolved policy. Never configuration: see :mod:`pssfmt.style`.
@@ -153,6 +161,9 @@ class BuildContext:
     registry: RuleRegistry = field(default=REGISTRY)
     #: Where the author has switched the formatter off (``P3-9``, § 5.3).
     hatches: Hatches = field(default=NO_HATCHES)
+    #: Whether the parser reported no syntax errors for this tree (``P4-13``).
+    #: Only a rule that *adds* tokens may consult it; see the class docstring.
+    parsed_cleanly: bool = True
 
     def build(self, node: Any) -> Layout:
         """Lays out *node*: its builder if it has one, verbatim if it does not."""
@@ -211,7 +222,9 @@ def build_tree(tree: Any,
     """
     trivia = TriviaMap(tree.tokens, max_blank_lines=style.max_blank_lines)
     ctx = BuildContext(style=style, trivia=trivia, registry=registry,
-                       hatches=scan_hatches(trivia))
+                       hatches=scan_hatches(trivia),
+                       parsed_cleanly=getattr(
+                           tree, "num_syntax_errors", 0) == 0)
     doc = ctx.build(tree.root)
     text = render(
         doc,

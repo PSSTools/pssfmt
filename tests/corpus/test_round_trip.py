@@ -71,14 +71,15 @@ BROKEN_BUCKETS = broken_buckets()
 #: The marks are strict, so fixing a gap turns the corresponding entry into a
 #: failure and forces it to be deleted. A list like this rots the moment it is
 #: allowed to pass silently.
+#:
+#: The three ``pss31/`` entries were removed when ``U-8a`` and ``U-8c`` were
+#: **withdrawn** -- neither was ever a pssparser defect. Those files were
+#: transcribed from the LRM's examples, which are fragments: a bare ``action``
+#: at package scope and a ``cover`` inside an activity are syntax errors *by the
+#: standard*, so accepting them would have been the unsound direction. The
+#: corpus files were completed instead (pssparser P7-C1); see "Completing LRM
+#: examples" in the corpus's ``PROVENANCE.md``.
 KNOWN_UNPARSEABLE = {
-    "pss31/annotations.pss":
-        "U-8a: `action` in a package -- package_body_item lists only "
-        "abstract_action_declaration",
-    "pss31/behavioral_coverage.pss":
-        "U-8a: `action` in a package (also U-8c: `cover` in an activity)",
-    "pss31/templates_and_activity.pss":
-        "U-8a: `action` in a package",
     "lexical/numbers.pss":
         "U-8d: `_` separator inside a based number's value (16'sH_FF)",
     "lexical/comments_and_strings.pss":

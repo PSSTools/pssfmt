@@ -134,14 +134,43 @@ def _comments(stream: Any) -> List[Any]:
     return [t for t in stream if t.is_comment]
 
 
-def check_token_equivalence(original: str,
-                            formatted: str) -> Tuple[Violation, ...]:
+def check_token_equivalence(original: str, formatted: str,
+                            allow_dropped_semicolons: bool = False,
+                            allow_added_semicolons: bool = False
+                            ) -> Tuple[Violation, ...]:
     """Check 1: the output says the same thing the input said.
 
     Two comparisons, reported separately because they fail for different
     reasons: a code-token difference is a rule emitting or eating text, while a
     comment difference is nearly always the trivia map attaching a comment to
     the wrong side of something.
+
+    The semicolon exemption
+    -----------------------
+    The two flags are the only things that let the token counts differ at all,
+    and they exist for exactly one option: ``optional_semicolon``
+    (:class:`~pssfmt.style.SemicolonMode`), whose ``omit`` deletes semicolons
+    PSS never required and whose ``require`` writes them. Both are off by
+    default, and the caller turns them on from the style rather than this
+    module reading one -- a verifier that consulted the configuration could be
+    made to excuse whatever it had just done.
+
+    Narrow in three ways that matter. Only ``;`` may differ. Only in the
+    direction the caller asked for, so a formatter set to ``omit`` that
+    *inserted* one still fails. And the tokens on either side must still line
+    up in order.
+
+    That third property has a stated exception, which is the honest cost of
+    letting the two modes coexist across constructs: with **both** flags on --
+    only reachable through ``semicolon_overrides``, since a single global mode
+    is one or the other -- a semicolon that *moved* reads as a deletion here
+    and an insertion there, and passes. With either flag alone it does not.
+
+    What is given up beyond that is real too: a rule that dropped a *required*
+    terminator would pass this check. Check 3 is what catches that -- a
+    statement without its terminator does not parse -- which is why the
+    exemption is safe here and would not be safe in a tool that ran this check
+    alone.
 
     Both sides are compared with line endings normalised, and that exemption
     is narrow enough to state exactly: it permits ``\\r\\n`` <-> ``\\n`` and
@@ -162,10 +191,15 @@ def check_token_equivalence(original: str,
 
     a = _significant(_tokens.tokenize(_normalize(original)))
     b = _significant(_tokens.tokenize(_normalize(formatted)))
-    diff = _first_difference([(t.type, t.text) for t in a],
-                            [(t.type, t.text) for t in b])
-    if diff is not None:
-        out.append(_token_violation("tokens", a, b, diff))
+    if allow_dropped_semicolons or allow_added_semicolons:
+        at = _difference_modulo_semicolons(
+            a, b, allow_dropped_semicolons, allow_added_semicolons)
+    else:
+        i = _first_difference([(t.type, t.text) for t in a],
+                              [(t.type, t.text) for t in b])
+        at = None if i is None else (i, i)
+    if at is not None:
+        out.append(_token_violation("tokens", a, b, at))
 
     # Trailing whitespace inside a comment is not content, and stripping it is
     # something the formatter is expected to do. A `//` comment carries its own
@@ -206,10 +240,21 @@ def check_parse_errors(original: str, formatted: str,
 
 
 def verify(original: str, formatted: str,
-           original_errors: Optional[int] = None) -> Tuple[Violation, ...]:
+           original_errors: Optional[int] = None,
+           allow_dropped_semicolons: bool = False,
+           allow_added_semicolons: bool = False) -> Tuple[Violation, ...]:
     """Runs checks 1 and 3. Idempotence needs the formatter, so it lives in
-    :func:`format_safely`."""
-    return (check_token_equivalence(original, formatted)
+    :func:`format_safely`.
+
+    The two semicolon flags are passed straight to
+    :func:`check_token_equivalence`; see its docstring. Both default to off,
+    so a caller that formats with ``optional_semicolon`` set to anything but
+    ``preserve`` and forgets to say so gets a rejected format rather than an
+    unchecked one.
+    """
+    return (check_token_equivalence(original, formatted,
+                                    allow_dropped_semicolons,
+                                    allow_added_semicolons)
             + check_parse_errors(original, formatted, original_errors))
 
 
@@ -223,7 +268,9 @@ def _default_formatter(src: str) -> str:
 
 def format_safely(src: Any,
                   formatter: Callable[[str], str] = _default_formatter,
-                  check_idempotence: bool = True) -> SafeResult:
+                  check_idempotence: bool = True,
+                  allow_dropped_semicolons: bool = False,
+                  allow_added_semicolons: bool = False) -> SafeResult:
     """Formats *src*, verifies the result, and falls back to *src* on failure.
 
     :param src: PSS source as :class:`str` or UTF-8 :class:`bytes`.
@@ -233,6 +280,11 @@ def format_safely(src: Any,
         output to be stable. On by default -- verible ships the equivalent
         check on by default too, and it is the check that catches a rule
         oscillating between two layouts.
+    :param allow_dropped_semicolons: permit the output to be missing ``;``
+        tokens the input had. Set it from the style, and only when that style
+        asks for it -- see :func:`check_token_equivalence`.
+    :param allow_added_semicolons: the same, for ``;`` the output has and the
+        input did not.
     :raises UnicodeDecodeError: if *src* is bytes that are not UTF-8. This is
         the one failure that is **not** caught, because there is no text to
         hand back and pretending otherwise would mean writing a guess to the
@@ -259,7 +311,10 @@ def format_safely(src: Any,
                 "tokens", "formatter returned %s, not str"
                 % type(formatted).__name__),))
 
-    violations = list(verify(text, formatted))
+    violations = list(verify(
+        text, formatted,
+        allow_dropped_semicolons=allow_dropped_semicolons,
+        allow_added_semicolons=allow_added_semicolons))
 
     if check_idempotence:
         try:
@@ -302,9 +357,10 @@ def _show(value: Any) -> str:
 
 
 def _token_violation(kind: str, a: List[Any], b: List[Any],
-                     i: int) -> Violation:
+                     at: Tuple[int, int]) -> Violation:
+    i, j = at
     ta = a[i] if i < len(a) else None
-    tb = b[i] if i < len(b) else None
+    tb = b[j] if j < len(b) else None
     return Violation(
         kind,
         "token %d changed: %s -> %s (input has %s, output %d)"
@@ -313,6 +369,42 @@ def _token_violation(kind: str, a: List[Any], b: List[Any],
            _show(tb.text if tb is not None else None),
            _plural(len(a), "code token"), len(b)),
         line=tb.line if tb is not None else None)
+
+
+def _difference_modulo_semicolons(a: Sequence[Any], b: Sequence[Any],
+                                  dropped: bool, added: bool
+                                  ) -> Optional[Tuple[int, int]]:
+    """``(index in a, index in b)`` of the first real difference, or ``None``.
+
+    A single forward walk rather than a diff, because the edit being excused
+    is not a general one: *b* is *a* with some ``;`` tokens removed
+    (*dropped*) or inserted (*added*), so at every step either the two agree
+    or one side is sitting on a semicolon the other does not have.
+
+    Each direction is opted into separately, and that is what keeps the walk
+    honest with one flag set: a formatter that only deletes cannot be excused
+    an insertion, and a general diff -- which forgives both unconditionally --
+    would let a *moved* semicolon through as two edits that cancel. With both
+    flags set it does let that through; see the caller's docstring.
+    """
+    i = j = 0
+    while i < len(a) and j < len(b):
+        if (a[i].type, a[i].text) == (b[j].type, b[j].text):
+            i += 1
+            j += 1
+        elif dropped and a[i].text == ";":
+            i += 1
+        elif added and b[j].text == ";":
+            j += 1
+        else:
+            return i, j
+    while dropped and i < len(a) and a[i].text == ";":
+        i += 1
+    while added and j < len(b) and b[j].text == ";":
+        j += 1
+    if i != len(a) or j != len(b):
+        return i, j
+    return None
 
 
 def _line_of_first_difference(a: str, b: str) -> Optional[int]:

@@ -19,7 +19,7 @@ pytest.importorskip("pssparser")
 
 from pssfmt.rules import decls, format_source  # noqa: E402
 from pssfmt.verify import verify  # noqa: E402
-from pssfmt.style import Construct, Style  # noqa: E402
+from pssfmt.style import Construct, SemicolonMode, Style  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -28,11 +28,11 @@ def fmt(src: str, style: Style = None) -> str:
     return format_source(src, style=style) if style else format_source(src)
 
 
-def roundtrips(src: str) -> None:
+def roundtrips(src: str, style: Style = None) -> None:
     """Formatting is stable and reproduces *src* exactly."""
-    once = fmt(src)
+    once = fmt(src, style)
     assert once == src
-    assert fmt(once) == once
+    assert fmt(once, style) == once
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +85,23 @@ class TestBraces:
             "}\n" % kind
         )
 
-    def test_a_declaration_keeps_its_trailing_semicolon(self):
-        """``enum e {A, B};`` -- the grammar makes the ``;`` a sibling.
+    def test_a_declaration_drops_its_optional_semicolon(self):
+        """``struct s {};`` -- the ``;`` is an empty ``package_body_item``.
 
-        Treated as a member of its own it lands on its own line. It belongs to
-        the declaration it terminates.
+        PSS does not require it and the default style does not write it. See
+        ``tests/test_semicolons.py`` for the rest of this rule, including the
+        semicolons that are *not* optional and stay.
         """
-        roundtrips("package p {\n    struct s {};\n}\n")
+        assert fmt("package p {\n    struct s {};\n}\n") == (
+            "package p {\n"
+            "    struct s {}\n"
+            "}\n"
+        )
+
+    def test_preserve_keeps_it_on_the_line_it_terminates(self):
+        """Treated as a member of its own it would land on its own line."""
+        roundtrips("package p {\n    struct s {};\n}\n",
+                   Style(optional_semicolon=SemicolonMode.PRESERVE))
 
 
 class TestIndentationComesFromTheStyle:

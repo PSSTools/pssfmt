@@ -4,7 +4,7 @@ Found by pointing ``P1``'s round-trip gate at the ``pygments-pss`` corpus,
 which no ``pssparser`` suite had run against: that corpus was built for a
 *lexer*, so it contains constructs the AST tests never exercise.
 
-Every case here is valid PSS that ``pssparser`` rejects. They are marked
+Every case in :data:`GAPS` is valid PSS that ``pssparser`` rejects. They are marked
 ``xfail(strict=True)``, so this file is an executable specification -- fixing a
 gap turns its case green, which fails the strict mark and forces both this
 entry and the matching ``KNOWN_UNPARSEABLE`` entry to be deleted together.
@@ -31,13 +31,9 @@ pytestmark = [pytest.mark.corpus, pytest.mark.integration]
 
 
 GAPS = {
-    "U-8a: action in a package":
-        "package p { action a { } }",
     "U-8b: dist constraint":
         "component c { action a { rand int x; "
         "constraint { dist x := 1; } } }",
-    "U-8c: cover statement in an activity":
-        "component c { action a { activity { cover { } } } }",
     "U-8d: underscore inside a based number":
         "component c { bit[31:0] e = 16'h_FF; }",
     "U-8e: octal escape in a string literal":
@@ -45,10 +41,49 @@ GAPS = {
 }
 
 
+#: ``U-8a`` and ``U-8c``, withdrawn. Not fixed -- *never defects*. Both were
+#: read out of the three ``pss31/`` corpus files, which had been transcribed
+#: from the LRM's examples, and the LRM's examples are fragments rather than
+#: compilable PSS:
+#:
+#: * ``U-8a`` -- ``package_body_item`` (Annex B.1) admits only
+#:   ``abstract_action_declaration``. A bare ``action`` at package scope is a
+#:   syntax error by the standard.
+#: * ``U-8c`` -- ``activity_stmt`` (B.11) does not list ``cover_stmt``, which
+#:   B.7 admits only as a ``component_body_item``.
+#:
+#: Kept as live assertions rather than deleted. Both entries spent their whole
+#: life marked ``xfail(strict=True)`` here and in pssparser, which reads as
+#: *known and scheduled*; that is exactly why the misdiagnosis survived. Turning
+#: them around means the next person to "close U-8a" by widening the grammar
+#: gets a failing test naming the clause instead of a green suite.
+WITHDRAWN = {
+    "U-8a: action at package scope is a syntax error (B.1)":
+        "package p { action a { } }",
+    "U-8c: cover in an activity is a syntax error (B.11)":
+        "component c { action a { activity { cover { } } } }",
+}
+
+
 @pytest.mark.parametrize("src", GAPS.values(), ids=list(GAPS))
 @pytest.mark.xfail(strict=True, reason="U-8: pssparser grammar/lexer gap")
 def test_valid_pss_parses(src):
     assert cst.parse(src).num_syntax_errors == 0
+
+
+@pytest.mark.parametrize("src", WITHDRAWN.values(), ids=list(WITHDRAWN))
+def test_withdrawn_gaps_are_still_correctly_rejected(src):
+    assert cst.parse(src).num_syntax_errors > 0, (
+        "pssparser now accepts source Annex B does not derive. This was once "
+        "recorded as a U-8 gap; it is not one. Widening the grammar to admit "
+        "it makes the front end unsound -- see the note above WITHDRAWN.")
+
+
+@pytest.mark.parametrize("src", WITHDRAWN.values(), ids=list(WITHDRAWN))
+def test_the_formatter_survives_every_withdrawn_gap(src):
+    # Same fail-safe promise as for the open gaps: unparseable input, whatever
+    # the reason, still round-trips byte for byte.
+    assert format_null(src).text == src
 
 
 @pytest.mark.parametrize("src", GAPS.values(), ids=list(GAPS))

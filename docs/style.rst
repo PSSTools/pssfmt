@@ -125,6 +125,39 @@ for the two human voices::
 That is not a distribution, it is a wall: authors are wrapping *to* 80.
 ``print_width`` defaults to **80**.
 
+The optional semicolon: omitted
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PSS permits a bare ``;`` as a body item, so ``struct s { … };`` is a
+declaration followed by an empty one and the semicolon means nothing. It is a
+habit from C++ and SystemVerilog, where it is required.
+
+The corpus writes **27 of them, in 4 of 92 files**, against 701 declarations
+that do not. Within those four files the habit is consistent, which is what
+makes this a *style* rather than an oversight -- so it is an option
+(``optional_semicolon``) rather than a rule, with all three answers available
+(``omit``, ``preserve``, ``require``), and the default follows the majority
+and drops it.
+
+What is dropped is deliberately narrower than what is optional. A semicolon
+goes only where the grammar proves the member before it already ended:
+``struct``, ``component``, ``package``, ``enum`` and the rest of the
+declarations, all 27 of the corpus's instances. It does *not* go after
+``x1 with { … };`` or ``constraint c { … };``, where the derivation reaches a
+recursive knot it cannot prove -- and where the corpus writes the semicolon
+every time. Caution and evidence agree, which is the only reason a
+conservative default is worth having.
+
+``require`` is the same measurement read the other way, for the projects in
+the minority: it writes the semicolon after every declaration that closes with
+a ``}`` and can legally take one -- 627 of them across this corpus. The two
+modes are round-trip inverses on every corpus file, which is the property that
+would break first if either had the wrong idea about which semicolons are the
+optional ones.
+
+``tools/semicolon_survey.py`` derives both admissible sets from the grammar;
+``tests/corpus/test_semicolon_grammar.py`` fails if either drifts.
+
 Spacing
 -------
 

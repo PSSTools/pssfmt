@@ -581,7 +581,8 @@ class TestLines:
         its call sites.
         """
         monkeypatch.setattr(cli, "restrict",
-                            lambda source, formatted, ranges: "int stolen;\n")
+                            lambda source, formatted, ranges, drop=False:
+                            "int stolen;\n")
         f = tmp_path / "f.pss"
         f.write_text(UNTIDY)
         code, out, err = run("-i", "--lines", "1:2", f)
@@ -688,7 +689,8 @@ class TestExplain:
         instead of replacing it."""
         import pssfmt.explain as explain_mod
         monkeypatch.setattr(explain_mod, "verify",
-                            lambda a, b: (Violation("tokens", "invented"),))
+                            lambda a, b, *rest, **kw:
+                            (Violation("tokens", "invented"),))
         f = tmp_path / "f.pss"
         f.write_text(UNTIDY)
         code, out, err = run("--explain", f)

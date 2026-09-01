@@ -405,7 +405,10 @@ def explain(source: str, style: Style = DEFAULT_STYLE,
         decisions=tuple(d for d in trace if isinstance(d, Decision)),
         visits=tuple(v for v in trace if isinstance(v, Visit)),
         origins=recorder.origins,
-        violations=verify(source, built.text),
+        violations=verify(
+            source, built.text,
+            allow_dropped_semicolons=style.drops_optional_semicolons(),
+            allow_added_semicolons=style.adds_optional_semicolons()),
         _parents=_parents(built.doc))
 
 

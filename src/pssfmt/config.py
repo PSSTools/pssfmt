@@ -1,9 +1,11 @@
 """``P4-2`` -- where a :class:`~pssfmt.style.Style` comes from.
 
 A ``.pssfmt`` file, or a ``[tool.pssfmt]`` table in ``pyproject.toml``,
-discovered by walking up from each input file. Twelve keys (``PLAN.md``
-section 6.7), every one of them optional, and anything not mentioned keeps the
-measured default.
+discovered by walking up from each input file. Thirteen keys -- the twelve of
+``PLAN.md`` section 6.7 plus ``optional_semicolon``, added when the trailing
+``;`` after a declaration became a style rather than a fixed behaviour --
+every one of them optional, and anything not mentioned keeps the measured
+default.
 
 TOML, not YAML
 --------------
@@ -78,7 +80,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from .layout.align import AlignMode, GroupBoundary
-from .style import DEFAULT_STYLE, BraceMode, LineEnding, Style
+from .style import (
+    DEFAULT_STYLE,
+    BraceMode,
+    LineEnding,
+    SemicolonMode,
+    Style,
+)
 
 __all__ = [
     "ConfigError",
@@ -344,6 +352,9 @@ OPTIONS: Tuple[Option, ...] = (
            "end the file with a newline"),
     Option("line_ending", "line_ending", _choice("line_ending", LineEnding),
            "the line terminator to emit"),
+    Option("optional_semicolon", "optional_semicolon",
+           _choice("optional_semicolon", SemicolonMode),
+           "what to do with a `;` PSS does not require"),
 
     Option("alignment", "alignment", _choice("alignment", AlignMode),
            "how columns within a group of lines are aligned"),

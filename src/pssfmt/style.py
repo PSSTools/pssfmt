@@ -69,6 +69,7 @@ __all__ = [
     "BraceMode",
     "BreakMode",
     "LineEnding",
+    "SemicolonMode",
     "AlignMode",
     "GroupBoundary",
     "Style",
@@ -264,6 +265,38 @@ class BreakMode(str, Enum):
     NEVER = "never"
 
 
+class SemicolonMode(str, Enum):
+    """What happens to a ``;`` the grammar does not require.
+
+    PSS lets a body item be nothing but a ``;`` -- ``package_body_item``,
+    ``struct_body_item``, ``procedural_stmt`` and seven more each carry a bare
+    ``TOK_SEMICOLON`` alternative -- so ``struct s { … };`` is a struct
+    followed by an empty item, and the ``;`` says nothing. It is a habit
+    carried over from C++ and SystemVerilog, where it *is* required.
+
+    This is the only style option that changes the token stream rather than
+    the whitespace between tokens, which is why the verifier has to be told
+    about it (:func:`pssfmt.verify.verify`).
+
+    :attr:`OMIT` and :attr:`REQUIRE` are near-inverses rather than exact ones,
+    and the asymmetry is the difference between a house style and a mess.
+    ``omit`` removes any decorative ``;``, including the second one in
+    ``int x;;``. ``require`` writes one only after a ``}``, because that is
+    what the option is *for* -- ``struct s { … };`` -- and a mode that
+    terminated every terminated thing would produce ``int x;;``.
+    """
+
+    #: Drop it. The default: 27 of the corpus's 728 declarations are written
+    #: with one, in 4 of 92 files, so the majority is not close.
+    OMIT = "omit"
+    #: Leave the author's semicolons exactly where they are. What ``pssfmt``
+    #: did before this option existed.
+    PRESERVE = "preserve"
+    #: Write one after every declaration that closes with a ``}`` and can
+    #: legally take one -- the C++ and SystemVerilog habit, made consistent.
+    REQUIRE = "require"
+
+
 class LineEnding(str, Enum):
     """Line terminator for emitted files."""
 
@@ -393,6 +426,7 @@ class Style:
     max_blank_lines: int = 1
     insert_final_newline: bool = True
     line_ending: LineEnding = LineEnding.AUTO
+    optional_semicolon: SemicolonMode = SemicolonMode.OMIT
     alignment: AlignMode = AlignMode.INFER
     alignment_group_boundary: GroupBoundary = GroupBoundary.BLANK_LINES
 
@@ -404,6 +438,7 @@ class Style:
     alignment_overrides: Mapping[Construct, AlignMode] = field(default_factory=dict)
     boundary_overrides: Mapping[Construct, GroupBoundary] = field(default_factory=dict)
     break_overrides: Mapping[Construct, BreakMode] = field(default_factory=dict)
+    semicolon_overrides: Mapping[Construct, SemicolonMode] = field(default_factory=dict)
     spacing_overrides: Mapping[Site, Spacing] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -422,7 +457,7 @@ class Style:
         for name in (
             "indent_overrides", "continuation_overrides", "brace_overrides",
             "alignment_overrides", "boundary_overrides", "break_overrides",
-            "spacing_overrides",
+            "semicolon_overrides", "spacing_overrides",
         ):
             object.__setattr__(self, name, _frozen(getattr(self, name)))
 
@@ -453,6 +488,39 @@ class Style:
     def break_policy_for(self, construct: Construct) -> BreakMode:
         """How ``construct`` relates to line breaking."""
         return self.break_overrides.get(construct, BreakMode.FIT)
+
+    def optional_semicolon_for(self, construct: Construct) -> SemicolonMode:
+        """What to do with a ``;`` this body does not require."""
+        return self.semicolon_overrides.get(construct, self.optional_semicolon)
+
+    def _any_semicolon_mode(self, mode: SemicolonMode) -> bool:
+        return (self.optional_semicolon is mode
+                or any(m is mode for m in self.semicolon_overrides.values()))
+
+    def drops_optional_semicolons(self) -> bool:
+        """Whether *any* body may lose a ``;``.
+
+        The verifier's question, and the reason it is asked of the whole style
+        rather than of a construct: token equivalence is checked over the
+        file, so the exemption has to be decided before anything knows which
+        construct a given token sat in. ``True`` here does not mean a
+        semicolon *will* go, only that one is allowed to.
+        """
+        return self._any_semicolon_mode(SemicolonMode.OMIT)
+
+    def adds_optional_semicolons(self) -> bool:
+        """Whether *any* body may gain a ``;``. The other half of the above."""
+        return self._any_semicolon_mode(SemicolonMode.REQUIRE)
+
+    def rewrites_optional_semicolons(self) -> bool:
+        """Whether the two texts may differ in ``;`` at all, either way.
+
+        What :mod:`pssfmt.ranges` needs: its cut points are computed over an
+        alphabet, and the alphabet is the same whichever direction the option
+        moves the semicolons in.
+        """
+        return self.drops_optional_semicolons() \
+            or self.adds_optional_semicolons()
 
     def spacing_for(self, site: Site) -> Spacing:
         """Whitespace immediately around ``site``.

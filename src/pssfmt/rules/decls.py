@@ -55,7 +55,7 @@ from __future__ import annotations
 from typing import Any, List, NamedTuple, Optional, Tuple
 
 from ..layout import ALIGN_MARK, Layout, concat, indent, text
-from ..style import Construct, Site
+from ..style import Construct, SemicolonMode, Site
 from .emit import (
     code_span,
     hardline,
@@ -486,7 +486,15 @@ def _member_body(ctx: Any, node: Any, first: int, last: int) -> Layout:
     return _reproduce(ctx, node)
 
 
-def _member(ctx: Any, node: Any) -> Optional[_Member]:
+def _member(ctx: Any, node: Any, terminator: bool = False) -> Optional[_Member]:
+    """One member of a body, with its comments.
+
+    *terminator* writes a ``;`` after it -- ``SemicolonMode.REQUIRE``. It is a
+    flag here rather than something the caller concatenates on afterwards
+    because of *where* the token goes: between the member and its trailing
+    comment. ``struct s {} // note`` composed the other way round becomes
+    ``struct s {} // note;``, which is a semicolon inside a comment.
+    """
     span = code_span(ctx.trivia, node)
     if span is None:
         return None
@@ -500,6 +508,11 @@ def _member(ctx: Any, node: Any) -> Optional[_Member]:
         parts.append(lead.comments)
         parts.append(hardline(lead.blanks_after))
     parts.append(_member_body(ctx, node, first, last))
+    if terminator:
+        # No lexical floor: the caller only asks for this after a ``}``, which
+        # cannot be an escaped identifier and so cannot swallow what follows
+        # it. See ``_wants_a_terminator``.
+        parts.append(text(";"))
 
     trailing = _trailing(ctx, ctx.trivia.code_indices[last])
     if trailing is _BAIL:
@@ -574,6 +587,181 @@ def _tiles(spans: List[Tuple[int, int]], first: int, last: int) -> bool:
     return all(b[0] == a[1] + 1 for a, b in zip(spans, spans[1:]))
 
 
+#: Rules after which a sibling ``;`` is **decoration** rather than a
+#: terminator -- every alternative of the rule ends in a ``;`` or a ``}`` of
+#: its own, so a further one can only be the enclosing body's empty-item
+#: alternative.
+#:
+#: Derived, not curated: ``tools/semicolon_survey.py`` computes it as a least
+#: fixed point over ``PSSParser.g4`` and prints exactly this list.
+#: ``tests/corpus/test_semicolon_grammar.py`` re-runs the derivation whenever
+#: the grammar is on disk and fails if the two have drifted.
+#:
+#: The exclusions are the point. ``procedural_data_declaration`` is absent
+#: because it ends in an *expression* -- the grammar makes its terminator a
+#: sibling ``procedural_stmt``, so ``int a[4] = {1, 2};`` is a lone ``;``
+#: after a ``}`` that must never be dropped, and it is indistinguishable from
+#: ``enum e {A, B};`` by position alone. ``constraint_declaration`` and the
+#: traversal statements are absent for a softer reason -- they reach a
+#: recursive knot the fixed point cannot prove -- and the corpus agrees with
+#: the caution: all four of its ``x with { … };`` and ``constraint c { … };``
+#: sites write the semicolon.
+_SELF_TERMINATING = frozenset((
+    "abstract_action_declaration",
+    "abstract_monitor_declaration",
+    "action_declaration",
+    "action_field_declaration",
+    "action_handle_declaration",
+    "action_initializer_list",
+    "activity_atomic_block_stmt",
+    "activity_bind_stmt",
+    "activity_data_field",
+    "activity_declaration",
+    "activity_match_stmt",
+    "activity_parallel_stmt",
+    "activity_schedule_stmt",
+    "activity_scheduling_constraint",
+    "activity_select_stmt",
+    "activity_sequence_block_stmt",
+    "activity_super_stmt",
+    "aggregate_literal",
+    "annotation_attr_field",
+    "annotation_declaration",
+    "annotation_params_list",
+    "attr_field",
+    "bins_or_empty",
+    "compile_assert_stmt",
+    "component_data_declaration",
+    "component_declaration",
+    "component_pool_declaration",
+    "const_field_declaration",
+    "constraint_block",
+    "cover_stmt",
+    "covergroup_coverpoint",
+    "covergroup_coverpoint_binspec",
+    "covergroup_coverpoint_body_item",
+    "covergroup_cross",
+    "covergroup_cross_binspec",
+    "covergroup_cross_body_item",
+    "covergroup_declaration",
+    "covergroup_instantiation",
+    "covergroup_option",
+    "covergroup_options_or_empty",
+    "covergroup_type_instantiation",
+    "coverpoint_bins",
+    "cross_item_or_null",
+    "data_declaration",
+    "default_constraint",
+    "default_constraint_item",
+    "default_disable_constraint",
+    "dist_directive",
+    "empty_aggregate_literal",
+    "enum_declaration",
+    "exec_block",
+    "exec_block_stmt",
+    "exec_super_stmt",
+    "export_action",
+    "export_function",
+    "expression_constraint_item",
+    "extend_stmt",
+    "flow_ref_field_declaration",
+    "function_decl",
+    "generic_constraint_value",
+    "import_class_decl",
+    "import_class_function_decl",
+    "import_function",
+    "import_stmt",
+    "inline_covergroup",
+    "instance_override",
+    "map_literal",
+    "monitor_activity_concat_stmt",
+    "monitor_activity_declaration",
+    "monitor_activity_overlap_stmt",
+    "monitor_activity_schedule_stmt",
+    "monitor_activity_select_stmt",
+    "monitor_activity_sequence_block_stmt",
+    "monitor_constraint_block",
+    "monitor_declaration",
+    "monitor_field_declaration",
+    "monitor_handle_declaration",
+    "object_bind_stmt",
+    "object_ref_field_declaration",
+    "override_action_declaration",
+    "override_declaration",
+    "package_declaration",
+    "procedural_assignment_stmt",
+    "procedural_break_stmt",
+    "procedural_continue_stmt",
+    "procedural_function",
+    "procedural_match_stmt",
+    "procedural_return_stmt",
+    "procedural_sequence_block_stmt",
+    "procedural_void_function_call_stmt",
+    "procedural_yield_stmt",
+    "pyimport_from_module",
+    "pyimport_single_module",
+    "pyimport_stmt",
+    "resource_ref_field_declaration",
+    "soft_constraint_item",
+    "struct_declaration",
+    "struct_literal",
+    "symbol_call",
+    "symbol_declaration",
+    "target_code_exec_block",
+    "target_file_exec_block",
+    "target_template_function",
+    "type_override",
+    "typedef_declaration",
+    "unique_constraint_item",
+    "value_list_literal",
+))
+
+
+#: Rules that admit a bare ``;`` as an alternative -- the body kinds where an
+#: empty item is grammatical, and therefore the only ones
+#: ``SemicolonMode.REQUIRE`` may write one into.
+#:
+#: Derived by ``tools/semicolon_survey.py --empty-items`` and checked by
+#: ``tests/corpus/test_semicolon_grammar.py``, like :data:`_SELF_TERMINATING`.
+#: It is a *separate* question from that one and neither implies the other:
+#: deleting is justified by the member (what came before already ended, so the
+#: ``;`` says nothing), inserting is justified by the body (a rule with no
+#: empty-item alternative would be handed a syntax error). An ``enum``
+#: separates them cleanly -- ``enum e {A, B}`` is self-terminating so a ``;``
+#: after it goes, and ``enum_item`` is not here so no ``;`` is ever written
+#: between two enum items.
+#:
+#: Asked of the *tree* rather than of a ``Construct``: :func:`_permits_a_null_item`
+#: walks the wrapper chain the grammar actually built above a member, so a
+#: body kind nobody has mapped to a ``Construct`` yet cannot be answered wrongly
+#: by omission. Six of these -- the ``…_or_empty`` shapes and
+#: ``procedural_randomization_term`` -- are "X or ``;``" rules rather than item
+#: lists and can never appear in that chain, because none of them is in
+#: :data:`_PASSTHROUGH`.
+_PERMITS_EMPTY_ITEM = frozenset((
+    "action_body_item",
+    "activity_stmt",
+    "annotation_body_item",
+    "bins_or_empty",
+    "component_body_item",
+    "constraint_body_item",
+    "covergroup_body_item",
+    "covergroup_options_or_empty",
+    "cross_item_or_null",
+    "exec_block_stmt",
+    "inline_constraints_or_empty",
+    "monitor_activity_stmt",
+    "monitor_body_item",
+    "monitor_constraint_body_item",
+    "monitor_inline_constraints_or_empty",
+    "override_stmt",
+    "package_body_item",
+    "procedural_randomization_term",
+    "procedural_stmt",
+    "struct_body_item",
+))
+
+
 def _is_trailing_semicolon(ctx: Any,
                            span: Tuple[int, int],
                            prev: Optional[Tuple[int, int]]) -> bool:
@@ -583,7 +771,14 @@ def _is_trailing_semicolon(ctx: Any,
     the grammar makes it a sibling of the enum rather than part of it. Treated
     as a member in its own right it lands on its own line, which is how
     ``std_pkg.pss`` came back with four bare semicolons in it. It belongs to
-    the declaration it terminates, so it is merged into it.
+    the declaration it follows, and :func:`_semicolon_member` decides what
+    becomes of it there -- merged onto that line, or dropped.
+
+    Note what this function does *not* decide. It answers "does this ``;``
+    belong to the member before it", which is a question about position; the
+    separate question of whether the grammar *required* it is answered from
+    the member's rule, one call further on. Half of the semicolons reaching
+    here are required terminators the grammar models as siblings.
 
     The same-line test is what keeps this from swallowing a semicolon that the
     author genuinely put somewhere else, and it is also what makes it fire on
@@ -676,7 +871,213 @@ def _merge_terminal(ctx: Any, members: List[_Member],
     return True
 
 
-def _collect(ctx: Any, children: Any, separator: Optional[str] = None) \
+def _drop_terminal(ctx: Any, members: List[_Member],
+                   spans: List[Tuple[int, int]], at: int) -> bool:
+    """Deletes the code token at *at*, keeping everything attached to it.
+
+    :func:`_merge_terminal` without the token: the optional ``;`` of
+    ``SemicolonMode.OMIT``. The span still has to be claimed -- ``_tiles``
+    checks that the members between two braces account for every code
+    position, and a hole in that cover is how a body silently loses a member
+    -- so this is a deletion in the *output*, not in the bookkeeping.
+
+    The comment a ``;`` owns survives it. ``struct s {};  // done`` loses the
+    semicolon and keeps the note, re-attached to the ``}`` that is now the
+    last token on the line -- the same layout :func:`_trailing` would have
+    produced for it there. Dropping a token is allowed to cost that token and
+    nothing else.
+
+    ``False`` means :func:`_trailing` refused the run, and the caller keeps
+    the semicolon.
+
+    Nothing here looks at the ``;``'s *leading* trivia, and that is the same
+    silence as :func:`_merge_terminal`'s rather than an oversight: a comment
+    between the two tokens is on the previous token's line, so the trivia map
+    files it as that token's trailing run -- where
+    :func:`_is_trailing_semicolon` has already seen it and declined, long
+    before either function is called. ``} /* why */ ;`` reaches neither.
+    """
+    tail = _trailing(ctx, ctx.trivia.code_indices[at])
+    if tail is _BAIL:
+        return False
+    if tail is not None:
+        members[-1] = _Member(members[-1].blanks_before,
+                              concat([members[-1].layout, tail]))
+    spans[-1] = (spans[-1][0], at)
+    return True
+
+
+def _semicolon_member(ctx: Any, members: List[_Member],
+                      spans: List[Tuple[int, int]], at: int,
+                      construct: Optional[Construct],
+                      prev_rule: Optional[str]) -> bool:
+    """Disposes of the optional ``;`` at code position *at*.
+
+    The one place the style is consulted about a *token* rather than about the
+    space around one, and the only place ``pssfmt`` removes something the
+    author wrote. Three conditions gate it, and all three must hold:
+
+    * :meth:`~pssfmt.style.Style.optional_semicolon_for` says ``omit``;
+    * *prev_rule*, the rule of the member this ``;`` follows, is in
+      :data:`_SELF_TERMINATING` -- so the grammar already ended that member
+      and this ``;`` is the body's empty-item alternative;
+    * that member really did end where its rule says it ends -- see below;
+    * :func:`_drop_terminal` finds nothing attached to the token.
+
+    Anything else -- an unrecognised rule, a member built by error recovery,
+    a construct with no style answer -- merges it onto the line above, which
+    is what every ``pssfmt`` before this option did.
+
+    Why the rule name is not enough
+    -------------------------------
+    A rule name describes the grammar; error recovery produces nodes that do
+    not honour it. ``pathological/unclosed_string.pss`` is the corpus's proof:
+
+        component c {
+            string s = "this string is never closed;
+            int x = 1;
+        }
+
+    The unterminated literal runs to the end of its line, so the parser builds
+    a ``component_data_declaration`` that stops at the string -- with **no**
+    terminator -- and the next line's ``;`` becomes its sibling. That name is
+    in :data:`_SELF_TERMINATING`, correctly, because every alternative of the
+    real rule ends in ``;``. This one did not. Dropping that semicolon deletes
+    a token from a file whose author is mid-edit, which is the single thing
+    the tier is most careful never to do.
+
+    So the member is asked what its last token actually *was*. A rule that
+    self-terminates ends in ``;`` or ``}``; a truncated one does not, and the
+    two conditions together admit only members where the grammar and the text
+    agree.
+    """
+    if (construct is not None
+            and prev_rule in _SELF_TERMINATING
+            and _ends_with_a_terminator(ctx, spans[-1])
+            and ctx.style.optional_semicolon_for(construct)
+            is SemicolonMode.OMIT
+            and _drop_terminal(ctx, members, spans, at)):
+        return True
+    return _merge_terminal(ctx, members, spans, at)
+
+
+def _ends_with_a_terminator(ctx: Any, span: Tuple[int, int]) -> bool:
+    """Whether the member at *span* ends in a ``;`` or a ``}`` of its own."""
+    last = ctx.trivia.of(ctx.trivia.code_indices[span[1]]).token
+    return last.text in (";", "}")
+
+
+def _permits_a_null_item(node: Any, inner: Any) -> bool:
+    """Whether the grammar allows a bare ``;`` beside this member.
+
+    Asked of the wrapper chain the parser actually built -- *node* is the body
+    item as it came out of the tree, *inner* is :func:`_effective`'s answer,
+    and the rules between them are the ones that decide what a sibling of this
+    member may be. A ``struct`` in a package arrives as
+    ``package_body_item_ann`` -> ``package_body_item`` -> ``struct_declaration``
+    and ``package_body_item`` is the one carrying the empty-item alternative;
+    an ``enum``'s items arrive as bare ``enum_item`` nodes and none of them
+    carries it, which is why ``require`` never writes ``{A;, B}``.
+
+    Reading the tree rather than mapping :class:`~pssfmt.style.Construct` to a
+    grammar rule by hand is the safer direction of a question whose wrong
+    answer is a syntax error: a body kind nobody has written down yet is
+    absent from the set and gets no semicolon, where a hand-written map would
+    have to be *remembered* for each one.
+    """
+    while True:
+        if node.is_rule and node.rule_name in _PERMITS_EMPTY_ITEM:
+            return True
+        if node is inner or not node.is_rule \
+                or node.rule_name not in _PASSTHROUGH:
+            return False
+        rules = [c for c in node.children if c.is_rule]
+        if len(rules) != 1:
+            return False
+        node = rules[0]
+
+
+def _wants_a_terminator(ctx: Any, node: Any, inner: Any,
+                        span: Tuple[int, int],
+                        construct: Optional[Construct]) -> bool:
+    """Whether ``require`` should write a ``;`` after this member.
+
+    The mirror of :func:`_semicolon_member`, and deliberately *not* its exact
+    inverse. Five conditions:
+
+    * the parser understood the whole file -- see below;
+    * the style says ``require`` for this construct;
+    * the member's rule is in :data:`_SELF_TERMINATING`, so a ``;`` after it
+      would be decoration rather than a second terminator;
+    * the member ends in a ``}`` -- **not** merely in a terminator. This is
+      where the asymmetry with ``omit`` lives, and it is the whole difference
+      between a house style and a mess: ``omit`` turns ``int x;;`` into
+      ``int x;``, but ``require`` must not turn ``int x;`` into ``int x;;``.
+      What the option is *for* is the brace, ``struct s { … };``, so the brace
+      is what it asks for;
+    * the grammar admits an empty item beside this member --
+      :func:`_permits_a_null_item`.
+
+    The ``}`` test carries a local error-recovery guard too, for the same
+    reason it does on the deletion side: a member the parser cut short does
+    not end in the brace its rule promised, and a truncated fragment is the
+    last thing to append a token to.
+
+    Why a clean parse is required and deletion needs no such thing
+    -------------------------------------------------------------
+    Deleting is local -- the token goes, and every other token is read exactly
+    as before. Inserting is not: a new token changes how the text after it is
+    lexed and parsed, and in a file the parser did not understand there is
+    nothing here that knows what that text *is*.
+
+    ``pathological/lone_quote.pss`` is the corpus's proof, and it is not a
+    case anyone would have guessed:
+
+        component c {
+            int x = 'ff;
+            int y = 4';
+            int z = ';
+        }
+
+    Three unbalanced quotes, two syntax errors, and a ``component_declaration``
+    that nonetheless ends in an honest ``}``. Every local test above passes.
+    Writing ``};`` at the end of that file makes it parse *worse* -- three
+    errors, not two -- because the trailing garbage lexes differently with one
+    more character after it. No per-member condition can see that; the file
+    can. So the whole file is the unit for insertion, and only for insertion.
+    """
+    return (ctx.parsed_cleanly
+            and construct is not None
+            and ctx.style.optional_semicolon_for(construct)
+            is SemicolonMode.REQUIRE
+            and inner.is_rule
+            and not getattr(inner, "is_error", False)
+            and inner.rule_name in _SELF_TERMINATING
+            and ctx.trivia.of(ctx.trivia.code_indices[span[1]]).token.text == "}"
+            and _permits_a_null_item(node, inner))
+
+
+def _already_terminated(ctx: Any, children: Any, index: int,
+                        span: Tuple[int, int]) -> bool:
+    """Whether the member at *index* is already followed by its optional ``;``.
+
+    One member of lookahead, and it is what makes ``require`` idempotent:
+    without it the second pass would add a semicolon to a member that gained
+    one on the first and produce ``};;``. The same question
+    :func:`_is_trailing_semicolon` answers, asked one child early.
+    """
+    for later in children[index + 1:]:
+        if not later.is_rule:
+            return False
+        nxt = code_span(ctx.trivia, later)
+        if nxt is None:
+            continue
+        return _is_trailing_semicolon(ctx, nxt, span)
+    return False
+
+
+def _collect(ctx: Any, children: Any, separator: Optional[str] = None,
+             construct: Optional[Construct] = None) \
         -> Optional[Tuple[List[_Member], List[Tuple[int, int]]]]:
     """Members and their spans, or ``None`` if this body should not be touched.
 
@@ -701,7 +1102,16 @@ def _collect(ctx: Any, children: Any, separator: Optional[str] = None) \
     spans: List[Tuple[int, int]] = []
     #: Identity of the hatch the previous member belonged to, if any.
     hatch: Any = None
-    for child in children:
+    #: Rule name of the member a trailing ``;`` would attach to, or ``None``
+    #: when there is nothing to ask -- no member yet, a member the formatter
+    #: was switched off over, or one error recovery assembled. All three mean
+    #: "keep the semicolon", which is the answer that changes nothing.
+    prev_rule: Optional[str] = None
+    # Materialised because ``require`` needs one child of lookahead -- see
+    # ``_already_terminated`` -- and *children* arrives as a slice of the
+    # tree in one caller and a comprehension in the other.
+    children = list(children)
+    for index, child in enumerate(children):
         if not child.is_rule:
             # A terminal at member level. *separator* names the one the
             # grammar puts between members of this body and the caller
@@ -734,6 +1144,7 @@ def _collect(ctx: Any, children: Any, separator: Optional[str] = None) \
             members.append(built)
             spans.append((start, span[1]))
             hatch = covering
+            prev_rule = None
             continue
         # ``hatch`` is deliberately not cleared here. A range is a contiguous
         # run of code positions, so an unhatched member can never sit between
@@ -741,25 +1152,38 @@ def _collect(ctx: Any, children: Any, separator: Optional[str] = None) \
         # identity to match against. Clearing it would be a guard no test
         # could distinguish from its absence.
         if _is_trailing_semicolon(ctx, span, spans[-1] if spans else None):
-            if not _merge_terminal(ctx, members, spans, span[0]):
+            if not _semicolon_member(ctx, members, spans, span[0],
+                                     construct, prev_rule):
                 return None
             continue
-        built = _member(ctx, child)
+        # The *grammar* shape of the member, not whether a rule laid it out:
+        # a member this tier reproduces verbatim still ends where the grammar
+        # says it ends. An error node is the exception -- its name describes
+        # what the parser was attempting, not what it consumed.
+        inner = _effective(child)
+        built = _member(ctx, child,
+                        _wants_a_terminator(ctx, child, inner, span, construct)
+                        and not _already_terminated(ctx, children, index, span))
         if built is None:
             return None
         members.append(built)
         spans.append(span)
+        prev_rule = (inner.rule_name if inner.is_rule
+                     and not getattr(inner, "is_error", False) else None)
     return members, spans
 
 
 def _members_of(ctx: Any, node: Any, open_at: int, close_at: int,
-                separator: Optional[str] = None) -> Optional[List[_Member]]:
+                separator: Optional[str] = None,
+                construct: Optional[Construct] = None) \
+        -> Optional[List[_Member]]:
     """The body's members, or ``None`` if this body should not be touched."""
     code = ctx.trivia.code_indices
     open_pos = code.index(node.children[open_at].token_index)
     close_pos = code.index(node.children[close_at].token_index)
 
-    collected = _collect(ctx, node.children[open_at + 1:close_at], separator)
+    collected = _collect(ctx, node.children[open_at + 1:close_at], separator,
+                         construct)
     if collected is None:
         return None
     members, spans = collected
@@ -968,7 +1392,8 @@ def _block(ctx: Any, node: Any, construct: Construct,
         return _reproduce(ctx, node)
     open_at, close_at = braces
 
-    members = _members_of(ctx, body, open_at, close_at, separator)
+    members = _members_of(ctx, body, open_at, close_at, separator,
+                          construct)
     if members is None:
         return _reproduce(ctx, node)
 
@@ -1189,7 +1614,8 @@ def register(registry) -> None:
     @registry.rule("compilation_unit")
     def _compilation_unit(ctx, node):
         """The file itself: a body with no braces and no indentation."""
-        collected = _collect(ctx, [c for c in node.children if c.is_rule])
+        collected = _collect(ctx, [c for c in node.children if c.is_rule],
+                             construct=Construct.PACKAGE_BODY)
         if collected is None:
             return ctx.verbatim(node)
         members, spans = collected

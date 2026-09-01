@@ -103,6 +103,13 @@ The options
      - ``auto``, ``lf`` or ``crlf``. ``auto`` keeps whichever the file
        already uses, and a file that mixes them is given the one it uses
        most. Output always has exactly one kind.
+   * - ``optional_semicolon``
+     - ``"omit"``
+     - What to do with a ``;`` PSS does not require -- the one after a
+       declaration's closing brace, as in ``struct s { … };``. ``omit``
+       deletes it, ``preserve`` leaves the author's exactly where they are,
+       and ``require`` writes one after every declaration that can take one.
+       See :ref:`optional-semicolons` below.
    * - ``alignment``
      - ``"infer"``
      - ``align``, ``flush-left``, ``preserve`` or ``infer``. ``infer``
@@ -123,6 +130,86 @@ error, and a near miss is told what you probably meant:
 
    $ pssfmt --check src/
    pssfmt: /work/.pssfmt: unknown option `indent_widht`; did you mean `indent_width`?
+
+.. _optional-semicolons:
+
+Optional semicolons
+-------------------
+
+PSS lets a body item be nothing but a ``;``. Ten body rules in the grammar
+carry a bare semicolon alternative, so this::
+
+    struct s {
+        int a;
+    };
+
+is a struct declaration followed by an *empty item*. The trailing ``;`` is
+decoration -- a habit carried over from C++ and SystemVerilog, where it is
+required. The default drops it::
+
+    struct s {
+        int a;
+    }
+
+Three settings:
+
+``omit`` (default)
+    Drop them.
+``preserve``
+    Leave the author's exactly where they are. This is what ``pssfmt`` did
+    before the option existed.
+``require``
+    Write one after every declaration that closes with a ``}`` and can
+    legally take one -- the C++ and SystemVerilog habit, made consistent
+    across the file rather than left to whoever typed it.
+
+``omit`` and ``require`` are round-trip inverses: running one and then the
+other lands exactly where the second would have on its own, so switching a
+project between them is a reversible decision.
+
+They are not exact mirrors, though, and the asymmetry is deliberate. ``omit``
+removes any decorative semicolon, including the second one in ``int x;;``;
+``require`` writes one only after a ``}``. What the option is *for* is the
+brace, so the brace is what it asks for -- a mode that terminated every
+terminated thing would produce ``int x;;``.
+
+**This is the only option that changes the tokens in your file** rather than
+the whitespace between them, so it is worth saying precisely what it will and
+will not touch.
+
+A semicolon is *dropped* only when the grammar proves the member before it
+already ended -- every alternative of that member's rule finishes with a ``;``
+or a ``}`` of its own -- and the member's last token really is one of those,
+which is what stops a half-typed line from losing its terminator. Everything
+else is left alone, including cases where a semicolon is technically optional
+but the derivation cannot prove it, such as ``x1 with { … };``.
+
+A semicolon is *written* only where the grammar admits an empty item beside
+the member -- which is a different question, and the reason ``require`` never
+puts one between two enum items -- and only when the whole file parsed
+cleanly. That last condition is the difference between adding and removing:
+deleting a token leaves every other token read exactly as before, while
+inserting one changes how the text after it is read, and in a file the parser
+did not understand there is nothing to base that on.
+
+Two semicolons that look identical make the point. In::
+
+    enum e {A, B};
+    int a[4] = {1, 2};
+
+both are a lone ``;`` on the same line, immediately after a ``}``. The first
+is decoration and goes; the second is the declaration's terminator -- the
+grammar makes it a sibling of the declaration rather than part of it -- and
+stays. Position cannot tell them apart, which is why the rule is stated over
+the grammar and not over the text.
+
+The safety net knows about this. ``pssfmt`` verifies every format by re-lexing
+the output and comparing tokens, and moving one would fail that check by
+construction, so the check is given a narrow exemption: semicolons may differ,
+in the one direction the setting actually moves them, and nothing else may.
+Under ``omit`` an *inserted* semicolon still fails; under ``require`` a dropped
+one does. A semicolon lost from inside a string fails either way, and the
+output must still parse at least as well as the input did.
 
 Recognised, and not implemented
 -------------------------------
