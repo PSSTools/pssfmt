@@ -692,7 +692,6 @@ _SELF_TERMINATING = frozenset((
     "procedural_assignment_stmt",
     "procedural_break_stmt",
     "procedural_continue_stmt",
-    "procedural_function",
     "procedural_match_stmt",
     "procedural_return_stmt",
     "procedural_sequence_block_stmt",

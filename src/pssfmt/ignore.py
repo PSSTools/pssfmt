@@ -55,6 +55,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import List, Optional, Tuple
 
+from .encoding import decode as decode_bytes
+
 __all__ = ["IGNORE_NAME", "Rule", "Patterns", "IgnoreSet", "compile_pattern",
            "read_ignore_file", "load_ignores"]
 
@@ -328,7 +330,11 @@ def read_ignore_file(path: Path) -> Optional[Patterns]:
     every one of them.
     """
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        # Bytes and an explicit decode, matching source files and `.pssfmt`:
+        # a `.pssfmtignore` saved as UTF-16 by a Windows editor would
+        # otherwise be treated as unreadable, which here means "ignores
+        # nothing" -- a silent failure that formats files the user excluded.
+        text = decode_bytes(Path(path).read_bytes())[0]
     except (OSError, UnicodeDecodeError):
         return None
     rules = []

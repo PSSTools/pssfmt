@@ -120,6 +120,33 @@ one it uses most -- a formatted file always has exactly one kind.
 Every file ends with a newline, and trailing blank lines and trailing
 whitespace are removed. See :doc:`style`.
 
+Character encodings
+-------------------
+
+The encoding is detected from the file and then preserved. UTF-8 is the
+default and the assumption when nothing says otherwise; a byte-order mark for
+UTF-8, UTF-16 (either byte order), or UTF-32 is honoured, and UTF-16 without a
+mark is recognised too.
+
+Whatever comes in goes back out. A UTF-16 LE file with a mark is still a
+UTF-16 LE file with a mark after ``-i``, and a file with no mark does not
+acquire one. This matters on Windows, where ``Set-Content`` and ``>`` in
+Windows PowerShell 5.1 write UTF-16 LE by default: those files format like
+any other, and ``pssfmt`` will not quietly convert your tree to UTF-8.
+
+Standard input and standard output follow the same rule. ``pssfmt f.pss >
+out.pss`` writes ``out.pss`` in the encoding ``f.pss`` was in, and an editor
+piping UTF-16 into ``pssfmt -`` gets UTF-16 back. Diffs and messages are text
+on the ordinary streams -- they are ``pssfmt`` talking to you, not your source
+code.
+
+``.pssfmt``, ``pyproject.toml``, and ``.pssfmtignore`` are read the same way,
+since they come out of the same editor as the source beside them.
+
+Bytes that are not text in any of those encodings are an error, exit ``2``,
+and the file is left alone. ``pssfmt`` will not substitute replacement
+characters for bytes it could not read and then write the result back.
+
 Which style, and which files
 ----------------------------
 

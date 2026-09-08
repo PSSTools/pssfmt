@@ -10,6 +10,28 @@ never upgrade again.
 
 ### Added
 
+- **UTF-16 and UTF-32 files are read, and written back in the encoding they
+  came in.** Windows PowerShell 5.1 — the shell that ships in the box —
+  writes UTF-16 LE by default, so `Set-Content` and `>` produce files that
+  `pssfmt` used to reject with *"not valid UTF-8"*. It now detects the
+  encoding from the byte-order mark (UTF-8, UTF-16 either order, UTF-32
+  either order), and recognises UTF-16 without a mark as well.
+
+  The encoding is **preserved**, not normalised. A UTF-16 LE file with a mark
+  is byte-identical afterwards outside the reformatted text, and a file with
+  no mark does not acquire one: `pssfmt` is a formatter, not a transcoder, and
+  a re-encode is a change that never shows up in the diff you read. `-i`,
+  stdout, and stdin all follow the same rule, so `pssfmt f.pss > out.pss` and
+  an editor driving `pssfmt -` both get back what they gave. A UTF-8 BOM is no
+  longer handed to the tokenizer as a stray `U+FEFF` on line 1.
+
+  `.pssfmt`, `[tool.pssfmt]`, and `.pssfmtignore` are decoded the same way —
+  a UTF-16 `.pssfmtignore` previously read as unreadable, and an unreadable
+  ignore file ignores nothing.
+
+  Bytes that are not text in any of those encodings are still an error and
+  still leave the file alone; the message now names what was tried.
+
 - **`optional_semicolon` — the trailing `;` after a declaration is now a style
   choice, and the default is to omit it.** PSS lets a body item be nothing but
   a `;`, so `struct s { … };` is a declaration followed by an empty one and

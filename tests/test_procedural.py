@@ -39,7 +39,7 @@ class TestItIsReachedAtAll:
     def test_the_rule_is_registered(self):
         """`P3-6`'s lesson, asserted rather than assumed: a rule that is not
         registered formats nothing and fails no test."""
-        assert "procedural_function" in REGISTRY
+        assert "function_decl" in REGISTRY
 
     def test_a_function_body_is_no_longer_reproduced_verbatim(self):
         out = fmt("component c {\nfunction void f() {\nint x;\n}\n}\n")

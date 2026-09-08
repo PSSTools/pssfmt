@@ -47,6 +47,7 @@ from pssparser import cst as _cst
 from pssparser import tokens as _tokens
 
 from . import null as _null
+from .encoding import decode as _decode_bytes
 from .finish import normalize as _normalize
 
 __all__ = [
@@ -273,7 +274,8 @@ def format_safely(src: Any,
                   allow_added_semicolons: bool = False) -> SafeResult:
     """Formats *src*, verifies the result, and falls back to *src* on failure.
 
-    :param src: PSS source as :class:`str` or UTF-8 :class:`bytes`.
+    :param src: PSS source as :class:`str`, or as :class:`bytes` in any
+        encoding :mod:`pssfmt.encoding` recognises.
     :param formatter: takes source text, returns formatted text. Defaults to
         the ``P1-2`` null formatter.
     :param check_idempotence: run the formatter a second time and require the
@@ -285,7 +287,8 @@ def format_safely(src: Any,
         asks for it -- see :func:`check_token_equivalence`.
     :param allow_added_semicolons: the same, for ``;`` the output has and the
         input did not.
-    :raises UnicodeDecodeError: if *src* is bytes that are not UTF-8. This is
+    :raises UnicodeDecodeError: if *src* is bytes in no encoding this tool
+        reads. This is
         the one failure that is **not** caught, because there is no text to
         hand back and pretending otherwise would mean writing a guess to the
         user's file.
@@ -294,8 +297,8 @@ def format_safely(src: Any,
     turned into a fail-safe result, because a crash must not lose the file
     either.
     """
-    text = src.decode("utf-8") if isinstance(src, (bytes, bytearray)) \
-        else src
+    text = _decode_bytes(bytes(src))[0] \
+        if isinstance(src, (bytes, bytearray)) else src
     if not isinstance(text, str):
         raise TypeError("expecting str or bytes, not %s" % type(src).__name__)
 

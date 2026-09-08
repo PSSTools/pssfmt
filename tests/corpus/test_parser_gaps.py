@@ -34,8 +34,6 @@ GAPS = {
     "U-8b: dist constraint":
         "component c { action a { rand int x; "
         "constraint { dist x := 1; } } }",
-    "U-8d: underscore inside a based number":
-        "component c { bit[31:0] e = 16'h_FF; }",
     "U-8e: octal escape in a string literal":
         'component c { string s = "a: \\101"; }',
 }
@@ -94,13 +92,16 @@ def test_the_formatter_survives_every_gap(src):
     assert format_null(src).text == src
 
 
-def test_the_two_lexer_gaps_are_lexer_gaps_not_parser_gaps():
+def test_the_lexer_gap_is_a_lexer_gap_not_a_parser_gap():
     # Worth distinguishing. A parser gap leaves well-formed tokens the grammar
     # cannot assemble; a lexer gap leaves synthetic error tokens standing for
     # text no rule matched. The second kind is invisible to anything working
     # above the token stream, so it needs recording where it can be seen.
-    assert tokens.tokenize("component c { bit[31:0] e = 16'h_FF; }") \
-        .num_errors > 0
+    #
+    # One case rather than two since U-8d closed: pssparser widened the digit
+    # portion of every BASED_*_LITERAL to any alphanumeric/underscore run, so
+    # `16'h_FF` now lexes as one token. The regression pin for that is in
+    # test_the_nearest_accepted_spellings_still_work below.
     assert tokens.tokenize('component c { string s = "a: \\101"; }') \
         .num_errors > 0
     assert tokens.tokenize("package p { action a { } }").num_errors == 0
@@ -113,6 +114,13 @@ def test_the_nearest_accepted_spellings_still_work():
         .num_syntax_errors == 0
     assert cst.parse("component c { action a { } }").num_syntax_errors == 0
     assert cst.parse("component c { bit[31:0] e = 16'hFF; }") \
+        .num_syntax_errors == 0
+    # U-8d, closed. Kept as a live assertion rather than deleted with the rest
+    # of the entry: the separator is legal in every other numeric literal the
+    # corpus contains (`1_000_000`, `0xDEAD_BEEF`, `8'b1010_1010`), and the
+    # based form was the one spelling that did not lex. A grammar change that
+    # narrows the digit run again should fail here by name.
+    assert cst.parse("component c { bit[31:0] e = 16'h_FF; }") \
         .num_syntax_errors == 0
     assert cst.parse('component c { string s = "a: \\n"; }') \
         .num_syntax_errors == 0

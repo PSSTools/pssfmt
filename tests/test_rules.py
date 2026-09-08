@@ -87,13 +87,16 @@ SHIPPED = {
     "extend_stmt",
     # P3-11, and the same lesson at the largest scale it occurs: 118 functions
     # across 46 of the 92 files, with everything inside every one of them
-    # unreachable. Registered for the *body*; the header and the statements
-    # inside it are separate vocabularies and separate items.
-    "procedural_function",
-    # P3-11a, the header. Three productions carry a `function_prototype` and
-    # one vocabulary covers all three, but only the first is a *block* -- a
-    # function with no body is a statement, so `_block` would have reproduced
-    # it whole and these two were unreachable through `P3-11`.
+    # unreachable. One name covers both halves -- pssparser factored the
+    # prototype-only `function_decl` and the bodied `procedural_function` into
+    # a single rule with a trailing `;`-or-`{` choice, so the definition/
+    # declaration split is now made inside the builder. The header and the
+    # statements inside a body are still separate vocabularies.
+    #
+    # P3-11a, the header. Two productions carry a `function_prototype` and one
+    # vocabulary covers both, but only a *bodied* one is a block -- a function
+    # with no body is a statement, so `_block` would have reproduced it whole
+    # and these were unreachable through `P3-11`.
     "function_decl",
     "import_function",
     # P3-11b, the statements inside a body. Six leaves plus `match`, which is

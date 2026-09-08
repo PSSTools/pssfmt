@@ -27,6 +27,7 @@ than infer "no change" from "no diff".
 
 from __future__ import annotations
 
+import codecs
 import io
 import os
 import stat
@@ -822,6 +823,155 @@ class TestLineEndingsSurviveTheRoundTrip:
             run("-i", f)
             assert run("--check", f)[0] == cli.OK
             assert first == cli.OK or f.read_bytes() != data
+
+
+# ---------------------------------------------------------------------------
+# Encodings, in the same place and for the same reason
+# ---------------------------------------------------------------------------
+
+
+def run_binary(*argv, stdin=b""):
+    """:func:`run`, but with streams that have a real byte layer.
+
+    ``io.StringIO`` has no ``.buffer``, so the default runner cannot observe
+    what ``pssfmt`` writes to stdout as *bytes* -- which is the entire
+    question for a non-UTF-8 file. These streams are the same shape as the
+    interpreter's own: a text wrapper over a binary buffer.
+
+    Returns ``(code, stdout_bytes, stderr_text)``.
+    """
+    raw_out = io.BytesIO()
+    out = io.TextIOWrapper(raw_out, encoding="utf-8", newline="")
+    err = io.StringIO()
+    inp = io.TextIOWrapper(io.BytesIO(stdin), encoding="utf-8", newline="")
+    code = cli.main([str(a) for a in argv], stdin=inp, stdout=out, stderr=err)
+    out.flush()
+    return code, raw_out.getvalue(), err.getvalue()
+
+
+#: Windows PowerShell 5.1 writes exactly this: UTF-16 LE with a mark.
+UTF16 = codecs.BOM_UTF16_LE + UNTIDY.encode("utf-16-le")
+UTF16_TIDY = codecs.BOM_UTF16_LE + TIDY.encode("utf-16-le")
+
+
+class TestEncodingsSurviveTheRoundTrip:
+    """A file's encoding is an attribute of the file, not a preference.
+
+    Windows tooling writes UTF-16 by default, so these files are ordinary PSS
+    that ``pssfmt`` used to refuse. Reading them is half the job; the half
+    that matters is writing them back the way they came, because a formatter
+    that also transcodes is making a change the user never sees in the diff
+    and cannot undo file by file.
+    """
+
+    def test_a_utf16_file_is_read_rather_than_refused(self, tmp_path):
+        f = tmp_path / "f.pss"
+        f.write_bytes(UTF16)
+        assert run("--check", f)[0] == cli.WOULD_CHANGE
+
+    def test_a_utf16_file_is_written_back_as_utf16(self, tmp_path):
+        f = tmp_path / "f.pss"
+        f.write_bytes(UTF16)
+        assert run("-i", f)[0] == cli.OK
+        assert f.read_bytes() == UTF16_TIDY
+
+    def test_a_utf16_be_file_keeps_its_byte_order(self, tmp_path):
+        """The one an aggregate ``utf-16`` codec would silently flip."""
+        f = tmp_path / "f.pss"
+        f.write_bytes(codecs.BOM_UTF16_BE + UNTIDY.encode("utf-16-be"))
+        assert run("-i", f)[0] == cli.OK
+        assert f.read_bytes() == (codecs.BOM_UTF16_BE
+                                  + TIDY.encode("utf-16-be"))
+
+    def test_a_utf8_bom_is_neither_dropped_nor_parsed(self, tmp_path):
+        """It must not reach the tokenizer as a ``U+FEFF`` on line 1, and it
+        must still be there afterwards."""
+        f = tmp_path / "f.pss"
+        f.write_bytes(codecs.BOM_UTF8 + UNTIDY.encode())
+        assert run("-i", f)[0] == cli.OK
+        assert f.read_bytes() == codecs.BOM_UTF8 + TIDY.encode()
+
+    def test_a_bom_less_utf16_file_gains_no_bom(self, tmp_path):
+        f = tmp_path / "f.pss"
+        f.write_bytes(UNTIDY.encode("utf-16-le"))
+        assert run("-i", f)[0] == cli.OK
+        assert f.read_bytes() == TIDY.encode("utf-16-le")
+
+    def test_a_clean_utf16_file_is_left_alone(self, tmp_path):
+        f = tmp_path / "f.pss"
+        data = codecs.BOM_UTF16_LE + ALREADY.encode("utf-16-le")
+        f.write_bytes(data)
+        assert run("--check", f)[0] == cli.OK
+        assert f.read_bytes() == data
+
+    def test_stdout_carries_the_input_encoding(self, tmp_path):
+        """``pssfmt f.pss > out.pss`` has to produce a file the user's other
+        tools can still read, which means the encoding they gave us."""
+        f = tmp_path / "f.pss"
+        f.write_bytes(UTF16)
+        code, out, _ = run_binary(f)
+        assert code == cli.OK
+        assert out == UTF16_TIDY
+
+    def test_stdin_is_decoded_from_bytes_not_the_locale(self):
+        """``sys.stdin`` would decode piped UTF-16 with the process's locale
+        encoding -- on Windows a legacy code page -- and produce mojibake
+        without raising. Silent corruption is worse than the error."""
+        code, out, _ = run_binary("-", stdin=UTF16)
+        assert code == cli.OK
+        assert out == UTF16_TIDY
+
+    def test_a_utf16_diff_is_text_on_the_text_stream(self, tmp_path):
+        """The diff is this run talking to the user, not the user's source.
+        It goes out as text however the file was encoded."""
+        f = tmp_path / "f.pss"
+        f.write_bytes(UTF16)
+        code, out, _ = run_binary("--diff", f)
+        assert code == cli.OK
+        assert b"-    int x   ;" in out
+        assert b"\x00" not in out
+
+    def test_bytes_in_no_encoding_at_all_still_fail(self, tmp_path):
+        """Detection must not turn into "decode something, anything". A file
+        that is genuinely not text has to stop the run."""
+        f = tmp_path / "f.pss"
+        f.write_bytes(b"component a {\n    int \xff x;\n}\n")
+        code, _, err = run("--check", f)
+        assert code == cli.ERROR
+        assert "cannot decode" in err
+
+    def test_crlf_and_utf16_together(self, tmp_path):
+        """The two byte-level questions are decided independently, so they
+        have to be checked together at least once."""
+        f = tmp_path / "f.pss"
+        source = "component a {\r\n    int x   ;\r\n}\r\n"
+        f.write_bytes(codecs.BOM_UTF16_LE + source.encode("utf-16-le"))
+        assert run("-i", f)[0] == cli.OK
+        assert f.read_bytes() == (
+            codecs.BOM_UTF16_LE
+            + "component a {\r\n    int x;\r\n}\r\n".encode("utf-16-le"))
+
+
+class TestConfigurationFilesAreDecodedTheSameWay:
+    """A ``.pssfmt`` comes off the same disk, out of the same editor."""
+
+    def test_a_utf16_config_is_read(self, tmp_path):
+        (tmp_path / ".pssfmt").write_bytes(
+            codecs.BOM_UTF16_LE
+            + 'indent_width = 2\n'.encode("utf-16-le"))
+        f = tmp_path / "f.pss"
+        f.write_text(UNTIDY)
+        assert run("-i", f)[0] == cli.OK
+        assert f.read_text() == "component a {\n  int x;\n}\n"
+
+    def test_a_utf16_ignore_file_is_read(self, tmp_path):
+        """An unreadable ignore file ignores nothing, which formats files the
+        user excluded -- a silent wrong answer rather than a loud one."""
+        (tmp_path / ".pssfmtignore").write_bytes(
+            codecs.BOM_UTF16_LE + "skip.pss\n".encode("utf-16-le"))
+        (tmp_path / "skip.pss").write_text(UNTIDY)
+        code, _, _ = run("--check", tmp_path)
+        assert code == cli.OK
 
 
 # ---------------------------------------------------------------------------

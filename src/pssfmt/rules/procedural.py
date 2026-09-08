@@ -797,9 +797,29 @@ _STATEMENT_RULES = (
 )
 
 
+def _function_decl(ctx: Any, node: Any) -> Layout:
+    """``function_decl`` -- a prototype-only declaration *or* a definition.
+
+    The grammar used to offer these as two productions, ``function_decl`` for
+    ``... ;`` and ``procedural_function`` for ``... { ... }``, and this module
+    bound a builder to each. pssparser factored them into one rule with a
+    trailing ``(';' | '{' procedural_stmt* '}')`` choice, because as separate
+    alternatives the parser had to predict past the whole signature -- up to
+    36 tokens -- before it could tell them apart.
+
+    So the choice the parser no longer makes is made here instead, on the one
+    token it turns on: a body means the block builder, no body means the
+    statement builder. :func:`procedural_function` is no longer *registered* --
+    there is no such rule left to dispatch on, and a builder bound to a name
+    the grammar cannot produce is a builder no test can reach -- but it is
+    still the block half of this construct and is called from here.
+    """
+    return (procedural_function(ctx, node) if _braces(node) is not None
+            else _declaration(ctx, node))
+
+
 def register(registry: Any) -> None:
-    registry.register("procedural_function", procedural_function)
-    registry.register("function_decl", _declaration)
+    registry.register("function_decl", _function_decl)
     registry.register("import_function", _declaration)
     for rule_name in _STATEMENT_RULES:
         registry.register(rule_name, _statement)

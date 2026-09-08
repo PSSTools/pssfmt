@@ -211,6 +211,24 @@ REFORMATTED = {
     "stdlib/addr_reg_pkg.pss",
     "stdlib/executor_pkg.pss",
     "stdlib/std_pkg.pss",
+    # The three ``pss31/`` files, and they are here for a reason none of the
+    # entries above share: nothing about pssfmt changed. These files did not
+    # *parse* until pss-corpus completed them (``U-8a``/``U-8c`` were withdrawn
+    # as not-defects and the files were rewritten to declare their actions
+    # inside a component), so every rule declined them and the fail-safe
+    # reproduced them byte for byte. Now that they parse, Tier 1 sees them for
+    # the first time.
+    #
+    # What moves is the first kind this set already records -- an empty body
+    # written ``{ }``, and a body written on one line::
+    #
+    #     action write_a { }                ->  action write_a {}
+    #     action write_a { rand int size; } ->  action write_a {
+    #                                               rand int size;
+    #                                           }
+    "pss31/annotations.pss",
+    "pss31/behavioral_coverage.pss",
+    "pss31/templates_and_activity.pss",
 }
 
 

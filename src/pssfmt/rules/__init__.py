@@ -42,6 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
+from ..encoding import decode as _decode_bytes
 from ..finish import finish, normalize, resolve_line_ending
 from ..layout import Layout, Verbatim, align_text, render
 from ..style import DEFAULT_STYLE, LineEnding, Style
@@ -284,7 +285,8 @@ def format_source(src: Any,
     """
     from pssparser import cst as _cst
 
-    text = src.decode("utf-8") if isinstance(src, (bytes, bytearray)) else src
+    text = _decode_bytes(bytes(src))[0] \
+        if isinstance(src, (bytes, bytearray)) else src
     resolved = style.evolve(
         line_ending=LineEnding.CRLF
         if resolve_line_ending(style, text) == "\r\n" else LineEnding.LF)

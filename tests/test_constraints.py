@@ -260,12 +260,17 @@ class TestNoTokenIsEverLost:
 def test_the_corpus_constraints_format(request):
     """The coverage number, computed rather than quoted.
 
-    95 of the corpus's 102 constraint body items. The seven that decline are
+    96 of the corpus's 103 constraint body items. The seven that decline are
     each named in ``pssfmt.rules.constraints`` -- one ``if``, one ``foreach``,
     one ``unique``, one ``dist``, one braced implication, and the two
     expressions ``P3-4`` already declined (``**`` and ``>>``). The assertion
     is on the count so that a *new* kind of decline shows up as a failure
     rather than as a number nobody re-reads.
+
+    The total was 102 until pss-corpus completed the three ``pss31/`` files:
+    ``templates_and_activity.pss`` now parses and contributes the one item it
+    always contained. The number of *declines* is the load-bearing half of
+    this test and it did not move.
     """
     corpus = request.config.rootpath / "packages" / "pss-corpus"
     if not corpus.is_dir():
@@ -314,5 +319,5 @@ def test_the_corpus_constraints_format(request):
                     formatted += 1
             stack.extend(reversed(node.children))
 
-    assert formatted + declined == 102, (formatted, declined)
+    assert formatted + declined == 103, (formatted, declined)
     assert declined == 7, declined

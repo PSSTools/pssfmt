@@ -201,8 +201,25 @@ class TestSpans:
         # `enum` got a rule. That is the *rise* direction this comment
         # anticipates, and the response was the one it asks for -- look at
         # which lines, confirm they are enums, then move the number.
-        assert (total, files) == (449, 36), (
-            "%d lines across %d files report copied text, expected 451/36"
+        #
+        # 449 -> 309 when pss-corpus completed the three `pss31/` files. Not a
+        # pssfmt change and not a pssparser one: those files were transcribed
+        # from the LRM's examples as fragments, so they did not parse and the
+        # fail-safe copied all three whole. Running this same code over the
+        # corpus at its previous revision still reports 449/36 exactly, which
+        # is what says the parser update landing alongside it moved nothing
+        # here. The whole delta is those three files and it accounts for all
+        # 140 lines:
+        #
+        #     pss31/behavioral_coverage.pss    78 -> 8
+        #     pss31/templates_and_activity.pss 60 -> 22
+        #     pss31/annotations.pss            40 -> 8
+        #
+        # What still copies in them is the same three constructs that copy
+        # everywhere else in the corpus, which is why the file count is
+        # unchanged at 36 -- none of the three dropped to zero.
+        assert (total, files) == (309, 36), (
+            "%d lines across %d files report copied text, expected 309/36"
             % (total, files))
 
     def test_a_rule_is_named_for_every_line_or_verbatim_is(self):

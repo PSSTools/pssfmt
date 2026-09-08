@@ -79,9 +79,11 @@ BROKEN_BUCKETS = broken_buckets()
 #: standard*, so accepting them would have been the unsound direction. The
 #: corpus files were completed instead (pssparser P7-C1); see "Completing LRM
 #: examples" in the corpus's ``PROVENANCE.md``.
+#: ``lexical/numbers.pss`` left when ``U-8d`` was **fixed**: pssparser widened
+#: the digit portion of every ``BASED_*_LITERAL`` to any alphanumeric/underscore
+#: run, so ``16'sH_FF`` lexes. Struck here and in pssparser's table together, as
+#: the strict xfail exists to force.
 KNOWN_UNPARSEABLE = {
-    "lexical/numbers.pss":
-        "U-8d: `_` separator inside a based number's value (16'sH_FF)",
     "lexical/comments_and_strings.pss":
         "U-8e: octal escape in a string literal (\"\\101\")",
     "lexical/operators.pss":

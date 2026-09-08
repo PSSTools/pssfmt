@@ -67,6 +67,8 @@ from typing import Dict, List, Optional, Sequence, Set, TextIO, Tuple
 
 from .__version__ import __version__
 from .config import ConfigError, Resolver
+from .encoding import UTF_8, Encoding
+from .encoding import decode as decode_bytes
 from .explain import explain, report
 from .ignore import IgnoreSet, load_ignores
 from .ranges import LineRange, RangeError, parse_ranges, restrict
@@ -81,6 +83,13 @@ __all__ = ["main"]
 #: that has to be told which files are its own is one that will eventually be
 #: pointed at somebody's Verilog.
 SUFFIX = ".pss"
+
+#: What to say when the bytes are not text in any encoding we recognise.
+#: It names the encodings that *were* tried, because "not valid UTF-8" sends
+#: a user with a perfectly good UTF-16 file looking for a corruption that is
+#: not there -- and since :mod:`pssfmt.encoding` now reads those files, a
+#: message that still only mentions UTF-8 would be describing an older tool.
+UNDECODABLE = "cannot decode: not UTF-8, UTF-16, or UTF-32"
 
 #: Directories a walk never descends into.
 #:
@@ -244,7 +253,8 @@ def unified(before: str, after: str, path: str) -> str:
     return "".join(diff)
 
 
-def write_atomically(path: Path, text: str) -> None:
+def write_atomically(path: Path, text: str,
+                     encoding: Encoding = UTF_8) -> None:
     """Replace *path*'s contents, never leaving a partial file behind.
 
     Write a sibling temporary and rename over the target: a crash, a full
@@ -256,20 +266,28 @@ def write_atomically(path: Path, text: str) -> None:
     The temporary is a *sibling* rather than in the system temp directory
     because :func:`os.replace` is only atomic within a filesystem, and
     ``/tmp`` routinely is not the same one.
+
+    *encoding* is the one the file was **read** in, not a preference: see
+    :mod:`pssfmt.encoding`. A UTF-16 file stays UTF-16, mark and byte order
+    intact, because re-encoding a file the user did not ask to have re-encoded
+    is a change that does not show up in the diff they read.
     """
     directory = path.parent if str(path.parent) else Path(".")
     fd, tmp = tempfile.mkstemp(dir=str(directory), prefix=".pssfmt-",
                                suffix=SUFFIX)
     try:
-        # `newline=""` disables newline translation on write. On POSIX this is
-        # a no-op -- text mode substitutes `os.linesep`, which is already
-        # `\n` -- so no test on this platform can distinguish it, and the
-        # mutation run says so honestly rather than being worked around. On
-        # Windows it is the difference between `line_ending: lf` working and
-        # every emitted `\n` silently becoming `\r\n` on the way to the disk,
-        # which would make the whole of `pssfmt.finish` unobservable there.
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
+        # Binary, and the encoding applied by hand. Text mode would do the
+        # encoding but would also translate newlines, and `newline=""` turns
+        # that off only for the codecs where a `\n` is one byte. On POSIX the
+        # translation is a no-op -- text mode substitutes `os.linesep`, which
+        # is already `\n` -- so no test on this platform could distinguish it,
+        # and the mutation run says so honestly rather than being worked
+        # around. On Windows it is the difference between `line_ending: lf`
+        # working and every emitted `\n` silently becoming `\r\n` on the way
+        # to the disk, which would make the whole of `pssfmt.finish`
+        # unobservable there.
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(encoding.encode(text))
         # Carry the original's permissions over; mkstemp creates 0600, so
         # without this an in-place format quietly makes a file private.
         try:
@@ -285,15 +303,57 @@ def write_atomically(path: Path, text: str) -> None:
         raise
 
 
-def read_text(path: Path) -> str:
-    """Decode explicitly, and never translate newlines.
+def read_text(path: Path) -> Tuple[str, Encoding]:
+    """The file's text, and the encoding to write it back in.
 
-    ``newline=""`` matters as much as the encoding: Python's text mode turns
-    ``\\r\\n`` into ``\\n`` on read, which would make every CRLF file look
-    like an LF file and hand ``line_ending: auto`` the wrong answer for the
-    one setting it exists to serve.
+    Read as *bytes* and decoded here rather than opened in text mode, for two
+    reasons that pull the same way. Text mode turns ``\\r\\n`` into ``\\n`` on
+    read, which would make every CRLF file look like an LF file and hand
+    ``line_ending: auto`` the wrong answer for the one setting it exists to
+    serve. And it would have to be told an encoding up front, when the whole
+    point is that the bytes say which one it is (:mod:`pssfmt.encoding`).
     """
-    return path.read_bytes().decode("utf-8")
+    return decode_bytes(path.read_bytes())
+
+
+def write_stream(stream: TextIO, text: str, encoding: Encoding) -> None:
+    """Write formatted source to *stream* in the encoding it came in.
+
+    For the ordinary UTF-8 input this is a plain ``stream.write`` and nothing
+    is different. For a UTF-16 input it goes to the stream's underlying binary
+    buffer instead, so that ``pssfmt file.pss > out.pss`` and an editor
+    driving ``pssfmt -`` both get back a file in the encoding they supplied,
+    rather than one transcoded to whatever the process's stdout happens to be.
+    That is the same promise ``-i`` makes, kept in the mode where the caller
+    -- not ``pssfmt`` -- owns the destination.
+
+    A stream with no ``buffer`` (a ``StringIO``, which is what the tests pass,
+    and a captured stdout under some runners) takes the text as text. There is
+    no byte layer to write to, so preserving bytes is not on the table.
+    """
+    buffer = getattr(stream, "buffer", None) if not encoding.is_utf8 else None
+    if buffer is None:
+        stream.write(text)
+        return
+    # Anything already buffered on the text layer must land first, or the
+    # bytes written below overtake it.
+    stream.flush()
+    buffer.write(encoding.encode(text))
+    buffer.flush()
+
+
+def read_stdin(stdin: TextIO) -> Tuple[str, Encoding]:
+    """Standard input, decoded the same way a named file is.
+
+    Read through ``stdin.buffer`` when there is one, because ``sys.stdin``
+    would otherwise decode with the *locale* encoding -- on Windows a legacy
+    code page, which turns piped UTF-16 into mojibake without ever raising.
+    Silent corruption is worse than the error it replaces.
+    """
+    buffer = getattr(stdin, "buffer", None)
+    if buffer is None:
+        return stdin.read(), UTF_8
+    return decode_bytes(buffer.read())
 
 
 # ---------------------------------------------------------------------------
@@ -375,8 +435,15 @@ def explain_one(source: str, name: str, style: Style,
 
 def process(source: str, name: str, args, style: Style,
             reporter: Reporter,
-            ranges: Sequence[LineRange] = ()) -> int:
-    """Format one input and act on the result. Returns an exit code."""
+            ranges: Sequence[LineRange] = (),
+            encoding: Encoding = UTF_8) -> int:
+    """Format one input and act on the result. Returns an exit code.
+
+    *encoding* is what the input was decoded from, and every path that emits
+    the *source* -- stdout, ``-i`` -- puts it back in that encoding. The diff
+    and the messages are not source: they are this run talking to the user,
+    and they go out as text on the ordinary streams.
+    """
     if args.explain or args.explain_tree:
         return explain_one(source, name, style, reporter, args.explain_tree)
 
@@ -397,7 +464,7 @@ def process(source: str, name: str, args, style: Style,
         # fail-safe's whole promise is that a rejected format hands back the
         # input, and `result.text` is that input.
         if not (args.check or args.in_place or args.diff):
-            reporter.out.write(result.text)
+            write_stream(reporter.out, result.text, encoding)
         return ERROR
 
     if result.text == source:
@@ -405,7 +472,7 @@ def process(source: str, name: str, args, style: Style,
         if args.diff:
             return OK
         if not (args.check or args.in_place):
-            reporter.out.write(result.text)
+            write_stream(reporter.out, result.text, encoding)
         return OK
 
     reporter.changed.append(name)
@@ -415,10 +482,10 @@ def process(source: str, name: str, args, style: Style,
     if args.check:
         return WOULD_CHANGE
     if args.in_place:
-        write_atomically(Path(name), result.text)
+        write_atomically(Path(name), result.text, encoding)
         reporter.note("reformatted %s" % name)
     elif not args.diff:
-        reporter.out.write(result.text)
+        write_stream(reporter.out, result.text, encoding)
     return OK
 
 
@@ -520,8 +587,13 @@ def main(argv: Optional[Sequence[str]] = None,
         except ConfigError as exc:
             reporter.error(str(exc))
             return ERROR
-        return process(stdin.read(), "<stdin>", args, style, reporter,
-                       ranges)
+        try:
+            text, encoding = read_stdin(stdin)
+        except UnicodeDecodeError:
+            reporter.error("<stdin>: %s" % UNDECODABLE)
+            return ERROR
+        return process(text, "<stdin>", args, style, reporter, ranges,
+                       encoding)
 
     if STDIN in args.files:
         reporter.error("cannot mix - with named files")
@@ -556,17 +628,17 @@ def main(argv: Optional[Sequence[str]] = None,
             continue
 
         try:
-            source = read_text(path)
+            source, encoding = read_text(path)
         except OSError as exc:
             reporter.error("%s: %s" % (name, exc.strerror or exc))
             status = ERROR
             continue
         except UnicodeDecodeError:
-            reporter.error("%s: not valid UTF-8" % name)
+            reporter.error("%s: %s" % (name, UNDECODABLE))
             status = ERROR
             continue
 
-        code = process(source, name, args, style, reporter, ranges)
+        code = process(source, name, args, style, reporter, ranges, encoding)
         # ERROR outranks WOULD_CHANGE: a run that both found a diff and hit a
         # broken file must not report the milder of the two.
         if code == ERROR or status == ERROR:

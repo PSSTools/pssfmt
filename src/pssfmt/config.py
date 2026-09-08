@@ -79,6 +79,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
+from .encoding import decode as decode_bytes
 from .layout.align import AlignMode, GroupBoundary
 from .style import (
     DEFAULT_STYLE,
@@ -158,7 +159,13 @@ def _toml_loads(data: bytes, path: Path) -> Mapping[str, Any]:
                 "cannot read TOML on this interpreter; install `tomli` "
                 "(`pip install tomli`) or use Python 3.11 or newer") from None
     try:
-        return toml.loads(data.decode("utf-8"))
+        # Decoded the same way source files are: a `.pssfmt` written by the
+        # same Windows editor that wrote the `.pss` next to it is UTF-16, and
+        # refusing it would stop the run over a file the user can read.
+        # TOML is defined as UTF-8, so this is a courtesy to the tool that
+        # produced the file rather than an extension of the format -- and it
+        # is one-way, since nothing here writes a configuration back.
+        return toml.loads(decode_bytes(data)[0])
     except UnicodeDecodeError:
         raise ConfigError(path, "not valid UTF-8") from None
     except Exception as exc:  # tomllib.TOMLDecodeError, and tomli's

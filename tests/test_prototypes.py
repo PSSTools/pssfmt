@@ -65,8 +65,7 @@ class TestItIsReachedAtAll:
     across 3 files of declined construct until now: a function with no body is
     not a block, so ``P3-11``'s registration could never have reached it."""
 
-    @pytest.mark.parametrize("rule", ["procedural_function", "function_decl",
-                                      "import_function"])
+    @pytest.mark.parametrize("rule", ["function_decl", "import_function"])
     def test_the_rule_is_registered(self, rule):
         assert rule in REGISTRY
 
