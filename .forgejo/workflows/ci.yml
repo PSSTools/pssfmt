@@ -43,9 +43,17 @@ jobs:
       # public. Internal host names, tailnet addresses and CGNAT-range IPs must
       # not appear in tracked files -- if a build ever needs one, it belongs in
       # a repository secret, which is masked in logs.
+      #
+      # THE PATHSPEC EXCLUDES THE WHOLE DIRECTORY, not just this file, and the
+      # difference is not cosmetic. Excluding only `ci.yml` worked exactly as
+      # long as this was the only workflow here; docs.yml landed beside it on
+      # 2026-09-08 carrying its own copy of this very pattern, and each file
+      # would then match the OTHER's -- turning both jobs red for quoting the
+      # thing they are looking for. That is what happened to pssparser when
+      # conformance.yml landed, and to four edapack repos in wave 3a.
       run: |
         pattern='perch-char\.ts\.net|\.ts\.net|a9550|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+'
-        if git grep -nIE "$pattern" -- . ':!.forgejo/workflows/ci.yml' ; then
+        if git grep -nIE "$pattern" -- . ':!.forgejo/workflows/' ; then
           echo "::error::internal identifier found in a tracked file (see matches above)"
           exit 1
         fi

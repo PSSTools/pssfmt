@@ -1,0 +1,165 @@
+# Docs build for psstools/pssfmt on Forgejo Actions.
+#
+# THIS IS THE ONLY THING THAT PUBLISHES THESE DOCS. dvkit.org owns all
+# documentation for the estate: a repo's docs land at dvkit.org/<org>/<repo>/.
+# dvkit.org is a single Cloudflare Pages project and a deploy replaces the
+# WHOLE site, so there is exactly one publisher for it.
+#
+# What happens after this job, all of it host-side:
+#
+#   docs-fetch psstools/pssfmt main      # artifact -> staging/
+#   docs-promote / docs-deploy           # -> dvkit.org/psstools/pssfmt/
+#
+# The built HTML leaves as an ARTIFACT and nothing else. This job holds no
+# Cloudflare token and mounts nothing: a workflow file is public and editable
+# by anyone who can push, and the deploy credential is account-scoped.
+#
+# NO RELEASE-AUTHORITY GATE, deliberately. That switch decides who publishes
+# PACKAGES. Docs are not a release: they publish from Forgejo regardless of who
+# holds release authority, and adding the gate here would stop docs entirely.
+#
+# WHY THIS DOES NOT GO THROUGH IVPM, unlike psstools/pssc.
+# ivpm.yaml's `default-dev` set is the DEVELOPMENT set -- it carries pssparser,
+# and pulling that in means a C++/Cython/ANTLR build on a runner that has no
+# business doing one. Nothing in this doc set needs it:
+# docs/reference_api.rst autodocs `pssfmt.layout.*` and nothing else, and that
+# subpackage deliberately imports nothing (it is the extraction candidate --
+# see the note at the top of that file). Everything else under src/pssfmt that
+# does `from pssparser import ...` is internal and is not documented here.
+#
+# So this installs the DOC TOOLCHAIN ONLY. That is a second dependency list
+# beside ivpm.yaml, which is a real cost -- the two can drift. It is accepted
+# for a specific reason: psstools/pssc takes the ivpm route, its docs job goes
+# green, and its published API reference at dvkit.org/psstools/pssc/api.html
+# contains ZERO documented symbols, because the pssparser build inside that job
+# does not actually yield an importable extension and autodoc fails silently
+# while Sphinx exits 0. A heavier build that produces an empty reference is not
+# a stronger guarantee than a light one that produces a full reference; it is
+# just a slower way to ship nothing. The "documented symbols" assertion below
+# is what defends against the failure mode ivpm was supposed to prevent, and it
+# checks the OUTPUT rather than the toolchain.
+#
+# IF THIS DRIFTS FROM ivpm.yaml the build fails loudly, not silently: docs/
+# builds with -W (the `strict` target), so a missing extension, a missing
+# lexer, or an unresolvable cross-reference is an error rather than a warning.
+#
+# Constraints this file is shaped by, all measured on this instance:
+#
+#  1. No third-party actions. A bare `uses:` resolves against code.forgejo.org
+#     (Forgejo's DEFAULT_ACTIONS_URL), not github.com, so actions/setup-python
+#     does not exist here. `ubuntu-latest` maps to catthehacker/ubuntu:act-22.04.
+#  2. `python` unqualified DOES NOT EXIST in that image. Use python3.
+#  3. The artifact name is the `docs-<org>-<repo>` convention docs-fetch matches
+#     on, and `path: .../**` makes the build directory the ZIP ROOT --
+#     docs-fetch refuses an artifact with no index.html at the top level.
+#  4. sphinx-pss is NOT on PyPI (pygments-pss is). It resolves from
+#     git.dvkit.org rather than github.com so a docs build does not depend on
+#     GitHub being reachable; git.dvkit.org serves anonymously, which keeps
+#     this job credential-free including for pull requests from forks.
+
+name: Docs
+
+on:
+  - push
+  - pull_request
+  - workflow_dispatch
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for internal identifiers in tracked files
+        # This repo is published to git.dvkit.org and mirrored to GitHub, so
+        # anything committed here is public. Internal host names, tailnet
+        # addresses and CGNAT-range IPs must not appear in tracked files -- if
+        # a build ever needs one, it belongs in a repository secret, which is
+        # masked in logs.
+        #
+        # The pathspec excludes the whole .forgejo/workflows directory, not
+        # just this file. Excluding only itself is what made four edapack repos
+        # red for a day: with two workflows present, each matched the OTHER's
+        # copy of this very pattern -- and ci.yml beside this file carries it.
+        run: |
+          pattern='perch-char\.ts\.net|\.ts\.net|a9550|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+'
+          if git grep -nIE "$pattern" -- . ':!.forgejo/workflows/' ; then
+            echo "::error::internal identifier found in a tracked file (see matches above)"
+            exit 1
+          fi
+          echo "OK: no internal identifiers in tracked files"
+
+      - name: Install the documentation toolchain
+        # --break-system-packages is a FALLBACK, not the first attempt. Some
+        # rebuilds of catthehacker/ubuntu:act-22.04 mark the interpreter
+        # externally-managed (PEP 668), at which point a plain `pip install`
+        # exits 1 with a wall of text about virtual environments and the
+        # failure reads as a docs problem rather than an image problem. There
+        # is nothing to protect here -- the container is discarded at the end.
+        #
+        # This list mirrors the documentation entries of ivpm.yaml's
+        # `default-dev` set; see the header for why it is a list rather than an
+        # `ivpm update`.
+        run: |
+          pip_install() {
+            ./py/bin/python3 -m pip install -q "$@" && return 0
+            ./py/bin/python3 -m pip install -q --break-system-packages "$@"
+          }
+          python3 -m venv py
+          pip_install --upgrade pip setuptools wheel
+          pip_install sphinx furo myst-parser pygments-pss \
+            "sphinx-pss @ git+https://git.dvkit.org/psstools/sphinx-pss.git"
+          ./py/bin/python3 -c "import sphinx, furo, myst_parser, sphinx_pss; print('doc toolchain importable')"
+
+      - name: Build HTML docs
+        # The `strict` target, not `html`: it passes -W --keep-going, so a
+        # broken cross-reference or an unknown Pygments lexer fails the build.
+        # docs/ uses `.. code-block:: pss` in quickstart.rst and style.rst, and
+        # without sphinx-pss installed that is a warning -- which is to say,
+        # under -W, the check that the lexer actually arrived.
+        #
+        # Through docs/Makefile rather than calling sphinx-build directly, so
+        # this and a local `make -C docs strict` cannot diverge. SPHINXBUILD is
+        # overridden because the Makefile defaults it into the ivpm venv at
+        # packages/python/bin, which this job does not create.
+        run: |
+          SPHINXBUILD="$PWD/py/bin/sphinx-build" make -C docs strict
+
+      - name: Sanity-check the build
+        # Sphinx exits 0 on a build that produced almost nothing, and an empty
+        # doc set is worse than a failed one because it deploys.
+        run: |
+          test -s docs/_build/html/index.html \
+            || { echo "::error::no index.html in the build output"; exit 1; }
+          n=$(find docs/_build/html -name '*.html' | wc -l)
+          echo "generated pages: $n"
+          # A local build of this doc set produced 17 pages on 2026-09-08: the
+          # 9 authored pages, genindex/py-modindex/search, and the 5 _modules
+          # pages sphinx.ext.viewcode generates for pssfmt.layout. The floor is
+          # set well BELOW that on purpose: it exists to catch a COLLAPSED
+          # build, not to fail when somebody deletes a page.
+          [ "$n" -ge 12 ] || { echo "::error::only $n pages built; a known-good build of this doc set produces 17. Refusing to call this a doc set."; exit 1; }
+
+      - name: Fail if autodoc documented nothing
+        # THE CHECK THAT MATTERS MOST HERE, and the one psstools/pssc lacks.
+        # autodoc that cannot import its target emits a warning and moves on;
+        # under -W that is already fatal, so this is the second line of defence
+        # against the reference page rendering as prose with no API in it.
+        # A local build produced 45 signatures on 2026-09-08.
+        run: |
+          n=$(grep -c "sig-name descname" docs/_build/html/reference_api.html || true)
+          echo "documented symbols: $n"
+          if [ "$n" -lt 20 ]; then
+            echo "::error::reference_api.html carries only $n documented symbols; a known-good build has 45. autodoc is not importing pssfmt.layout."
+            exit 1
+          fi
+
+      - name: Upload docs
+        # Consumed by the host-side poller:
+        #   docs-fetch psstools/pssfmt main
+        uses: forgejo/upload-artifact@v4
+        with:
+          name: docs-psstools-pssfmt
+          path: docs/_build/html/**
+          if-no-files-found: error
