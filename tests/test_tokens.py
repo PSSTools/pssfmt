@@ -201,21 +201,10 @@ class TestItDeclinesRatherThanGuesses:
     claim: declining costs nothing that was not already the case.
     """
 
-    def test_a_template_parameter_list_is_left_alone(self):
-        """``P3-7``'s work, and the reason the vocabulary stops where it does.
-
-        131 of the corpus's 356 headers are this shape. They bring ``<``,
-        ``>``, ``,``, ``=`` and a default-value expression, they are where
-        every multi-line header lives, and they are a list that may need to
-        break rather than a run of tokens that fits.
-        """
-        src = "struct s<int W=8> : base_s {}\n"
-        assert fmt(src) == src
-
     @pytest.mark.parametrize("src", [
-        "component c /* why */ {}\n",
-        "package p {\n    import a /* x */ ::b;\n}\n",
-    ], ids=["header", "import"])
+        "struct s : b {} // why\n",
+        "package p {\n    import a::b; // why\n}\n",
+    ], ids=["declaration", "import"])
     def test_a_same_line_comment_is_left_alone(self, src: str):
         """A real answer exists; it is a question about comments, not gaps."""
         assert fmt(src) == src
@@ -249,9 +238,6 @@ class TestItDeclinesRatherThanGuesses:
         src = "component c {\n    import target function read;\n}\n"
         assert fmt(src) == src
 
-    def test_the_gap_before_the_brace_is_still_normalised_when_it_declines(self):
-        """Declining the token path does not undo what ``P3-2`` already did."""
-        assert fmt("struct s<int W=8>{}\n") == "struct s<int W=8> {}\n"
 
 
 class TestNoTokenIsEverLost:

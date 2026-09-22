@@ -153,6 +153,37 @@ def test_alignment_splits_hand_written_from_generated(surveys):
     assert gen["trailing comment runs: aligned"] == 0
 
 
+def test_the_blank_line_at_a_brace_is_still_two_voices_against_none(surveys):
+    """``S-4``'s evidence, pinned because a **deferral** rests on it.
+
+    Stripping a blank line written immediately after ``{`` was proposed,
+    implemented, and reverted -- against four style guides that all strip
+    them (``gofmt``, ``rustfmt``, ``black``, and ``clang-format``'s
+    ``MaxEmptyLinesToKeep`` not applying at a block boundary). What overruled
+    them is this: *two independent human voices* write it and the code
+    generator does not, which is the strongest shape of evidence this project
+    recognises.
+
+    A rule declined against good arguments will be proposed again. If the
+    corpus ever stops supporting the refusal, that should surface here rather
+    than in a re-litigation from the guides.
+    """
+    _mod, sv = surveys
+    hand = sv["hand-written"]
+    third = sv["third-party"]
+    generated = sv["generated"]
+
+    assert hand.blank_after_brace > 0 and third.blank_after_brace > 0, (
+        "the after-`{` blank line is no longer written by two independent "
+        "voices; `S-4`'s deferral in docs/status.rst rests on it"
+    )
+    assert generated.blank_after_brace == 0
+
+    # The other half is uncontested and was never the argument: one voice.
+    assert hand.blank_before_brace == 0
+    assert generated.blank_before_brace == 0
+
+
 def test_the_survey_reads_code_not_comments(surveys):
     """The trap that produced a wrong number in ``docs/style.rst``'s draft.
 

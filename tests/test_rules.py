@@ -81,6 +81,28 @@ SHIPPED = {
     "activity_bind_stmt",
     "action_handle_traversal_stmt",
     "action_type_traversal_stmt",
+    # S-6. `a: do step;` -- registered on the wrapper rather than on the
+    # statement, because the label and its colon belong to the wrapper and
+    # the statement inside is still built by its own rule.
+    "activity_labeled_stmt",
+    # S-1, the activity twin of the procedural one below.
+    "activity_if_else_stmt",
+    # S-1 and S-5 in a constraint. One builder for both, because the two
+    # differ only in their header tokens.
+    "if_constraint_item",
+    "foreach_constraint_item",
+    # S-12. `unique {a, b};` -- a statement like the five above it, with one
+    # more vocabulary entry and a site of its own.
+    "unique_constraint_item",
+    # S-1 and S-5. `if`/`else` and the three loop spellings, all of them one
+    # shape: a header, then a `procedural_stmt` wrapping a braced block.
+    # `procedural_repeat_stmt` covers `repeat (n)`, `repeat (i : n)` and
+    # `while`; its `repeat { … } while (e);` alternative declines inside the
+    # builder rather than by not being registered, since the rule name is
+    # shared.
+    "procedural_if_else_stmt",
+    "procedural_foreach_stmt",
+    "procedural_repeat_stmt",
     # P3-6, and a declaration body that should have shipped in P3-2: 31 of the
     # corpus's 92 files open an `extend`, and everything inside one was
     # unreachable until it was registered.

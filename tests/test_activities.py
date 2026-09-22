@@ -174,39 +174,153 @@ class TestItDeclinesRatherThanGuesses:
         src = in_activity("do step with { id == ri; };")
         assert fmt(src) == src
 
-    def test_a_label_declines(self):
-        """Eight instances, all in one file. One voice, as ``**`` was."""
-        src = in_activity("a:  do step;")
-        assert fmt(src) == src
+    def test_an_anonymous_block_is_laid_out(self):
+        """``T-46`` -- ``S-3``. The one documented exception to attached braces.
 
-    def test_a_repeat_iterator_colon_declines_but_its_body_does_not(self):
-        """A fifth colon construct, one instance.
+        This construct used to decline, and the reasoning was sound as far as
+        it went: ``docs/style.rst`` measures braces as *attached*, no corpus
+        file puts one alone, and a headerless block emits a line containing
+        only ``{``.
 
-        ``TOK_COLON`` is absent from the block header vocabulary, so the
-        *header* falls back to being reproduced while the body still opens
-        out -- the fallback ``_header`` has had since ``P3-2b``, doing useful
-        work rather than costing the six statements a whole-node decline
-        would.
+        What ``S-3`` decided is that the brace rule is about a brace and *its
+        header*. An anonymous sequence block has none, so there is nothing for
+        its brace to have moved off -- it is not an Allman brace, it is a
+        construct the rule does not describe. Declining it also cost the
+        traversals inside, which is the half that made it worth deciding.
         """
-        src = in_activity("repeat (ri : 4) { do step ; }")
-        out = fmt(src)
-        assert "repeat (ri : 4) {" in out
-        assert "                do step;" in out
+        out = fmt(in_activity("parallel {", "    { copy; chk; }",
+                              "    other;", "}"))
+        assert out == in_activity(
+            "parallel {",
+            "    {",
+            "        copy;",
+            "        chk;",
+            "    }",
+            "    other;",
+            "}")
 
-    def test_an_anonymous_block_declines(self):
-        """It has no header, so its ``{`` would have to sit on its own line.
+    def test_the_keyword_spelling_is_unaffected(self):
+        """``sequence { … }`` was always laid out and still is."""
+        out = fmt(in_activity("sequence { copy; chk; }"))
+        assert out == in_activity("sequence {", "    copy;", "    chk;", "}")
 
-        ``docs/style.rst`` measures brace placement as attached and no corpus
-        file puts a brace alone. An anonymous block does not fit the shape,
-        which is a reason to leave it rather than to special-case it.
-        """
-        src = in_activity("parallel {", "    { copy; chk; }", "    other;", "}")
-        assert fmt(src) == src
+    def test_an_anonymous_block_nests(self):
+        out = fmt(in_activity("parallel {", "    { { copy; } }", "}"))
+        assert "                    {\n" in out
+
+    def test_an_anonymous_block_is_idempotent(self):
+        once = fmt(in_activity("parallel {", "    { copy; chk; }", "}"))
+        assert fmt(once) == once
 
     def test_the_declining_construct_does_not_take_its_neighbours_with_it(self):
         """A decline is node-scoped: the statements around it still format."""
-        src = in_activity("a:  do step;", "do   other ;")
-        assert fmt(src) == in_activity("a:  do step;", "do other;")
+        src = in_activity("do step with { id == ri; };", "do   other ;")
+        assert fmt(src) == in_activity("do step with { id == ri; };",
+                                       "do other;")
+
+
+class TestTheIteratorColon:
+    """``T-48`` -- ``S-5``. ``repeat (i : 4)``, spaced.
+
+    Nothing here is measured. The corpus's one ``foreach`` is the *colon-less*
+    ``foreach (chans[i])`` spelling, so the number of iterator colons it
+    contains is **zero** and this is argued outright: C++'s range-``for``
+    writes ``for (auto x : xs)``, the inheritance colon beside it is 355/358
+    spaced, and lowRISC asks for a space either side of a colon that labels
+    rather than delimits.
+
+    What the item bought is the header. ``TOK_COLON`` was absent from the
+    block header vocabulary, so a ``repeat`` with an iterator had its header
+    reproduced while its body still opened out.
+    """
+
+    @pytest.mark.parametrize("header", [
+        "repeat (ri : 4) {", "repeat (ri:4) {", "repeat ( ri  :  4 ) {",
+    ], ids=["canonical", "tight", "wide"])
+    def test_every_spelling_lands_on_the_canonical_one(self, header: str):
+        out = fmt(in_activity(header, "    do step;", "}"))
+        assert "repeat (ri : 4) {" in out
+
+    def test_the_body_is_laid_out_too(self):
+        """The half that was already working, pinned so it stays working."""
+        out = fmt(in_activity("repeat (ri : 4) { do   step ; }"))
+        assert "                do step;" in out
+
+    def test_a_repeat_without_an_iterator_still_works(self):
+        """``repeat (4)`` -- three corpus instances, and the colon is
+        optional in all three grammar spellings that carry one."""
+        out = fmt(in_activity("repeat (4) { do step; }"))
+        assert "repeat (4) {" in out
+
+    def test_the_gap_comes_from_the_style(self):
+        out = fmt(in_activity("repeat (ri : 4) { do step; }"),
+                  Style(spacing_overrides={Site.COLON_ITERATOR: Spacing(0, 0)}))
+        assert "repeat (ri:4) {" in out
+
+    def test_it_is_idempotent(self):
+        once = fmt(in_activity("repeat (ri:4) { do step; }"))
+        assert fmt(once) == once
+
+
+class TestTheLabelColon:
+    """``T-49`` -- ``S-6``. ``a : do step;``.
+
+    **This decided nothing; it granted standing.** ``Site.COLON_LABEL`` has
+    been spaced since ``P3-0`` and ``docs/style.rst`` published it, credited
+    lowRISC, and then explained that the formatter had no standing to apply
+    it: both human voices space it in 36 instances and the code generator
+    does not in 84, which is a preference rather than a measurement. All
+    eight activity labels in the corpus are in one file.
+
+    So the whole visible effect of this item is that one voice being
+    overruled, and the tests are crafted rather than corpus-driven.
+    """
+
+    @pytest.mark.parametrize("src", ["a: do step;", "a : do step;",
+                                     "a:do step;", "a  :  do step;"],
+                             ids=["c-style", "canonical", "tight", "wide"])
+    def test_every_spelling_lands_on_the_canonical_one(self, src: str):
+        assert fmt(in_activity(src)) == in_activity("a : do step;")
+
+    def test_a_label_on_a_block_keeps_the_block(self):
+        out = fmt(in_activity("b:parallel { do x; }"))
+        assert "            b : parallel {\n" in out
+        assert "                do x;\n" in out
+
+    def test_an_unlabelled_statement_is_untouched(self):
+        assert fmt(in_activity("do  step ;")) == in_activity("do step;")
+
+    def test_the_gap_comes_from_the_style(self):
+        assert fmt(in_activity("a : do step;"),
+                   Style(spacing_overrides={Site.COLON_LABEL: Spacing(0, 0)})) \
+            == in_activity("a:do step;")
+
+    def test_the_match_arm_colon_is_a_different_site(self):
+        """The split is real and this is the test that proves it.
+
+        ``Site.COLON_CASE_ITEM`` is measured at 214/224 -- none before, one
+        after -- and moving the *label* colon must not move it. Two colons,
+        two sites, and the values differ, so a single shared site would show
+        up here as either arm losing its rule.
+        """
+        style = Style(spacing_overrides={Site.COLON_LABEL: Spacing(3, 3)})
+        src = ("component c {\n"
+               "    function int f(string n) {\n"
+               "        match (n) {\n"
+               '            ["a"]: return 1;\n'
+               "            default: return 0;\n"
+               "        }\n"
+               "    }\n"
+               "}\n")
+        assert '["a"]: return 1;' in fmt(src, style)
+
+    def test_it_is_idempotent(self):
+        once = fmt(in_activity("a:do step;"))
+        assert fmt(once) == once
+
+    def test_no_token_is_lost(self):
+        src = in_activity("a:do step;")
+        assert list(verify(src, fmt(src))) == []
 
 
 class TestNoTokenIsEverLost:

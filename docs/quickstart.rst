@@ -190,9 +190,15 @@ design and not a stage of it: the fallback formatter changes nothing, so an
 incomplete rule set cannot corrupt a file, and adding a rule cannot make an
 unrelated construct worse.
 
-The constructs left alone today include ``if``/``else``, loops, and any
-statement you wrapped across lines yourself. :doc:`status` lists them, and says
-why each one is waiting on a decision rather than on code.
+The constructs left alone today include an ``if`` branch you did not brace
+(adding the braces would change your tokens), ``repeat { … } while (e);``,
+inline ``with`` constraints, guarded ``select`` branches, coverage, and
+``monitor`` blocks. :doc:`status` lists them, and says why each one is waiting
+on a decision rather than on code.
+
+``if``/``else``, loops and wrapped statements used to be on that list and are
+not: see the style page for what was decided and :doc:`status` for what it
+cost.
 
 Underneath all of it is a contract worth knowing before you put this in a
 pre-commit hook: output re-lexes to the same tokens as input, formatting

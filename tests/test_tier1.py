@@ -160,11 +160,30 @@ class TestBlankLines:
                    Style(max_blank_lines=0)) == (
             "package p {\n    struct a {}\n    struct b {}\n}\n")
 
-    def test_a_blank_line_before_the_closing_brace_is_kept(self):
-        roundtrips("package p {\n    struct a {}\n\n}\n")
+    def test_a_blank_line_at_a_brace_is_kept(self):
+        """``T-47`` -- ``S-4``, **reverted**, and pinned so it stays reverted.
+
+        The item proposed stripping a blank line immediately after ``{`` and
+        immediately before ``}``. It was implemented and then measured, and
+        the measurement is why it is not here: the corpus writes 41 blank
+        lines after an opening brace, in 41 of its 92 files, across *two*
+        independent human voices -- 37 hand-written and 4 third-party -- and agreement across independent authors
+        is what this project counts as evidence. The generator writes none.
+
+        Kept as a test rather than as an absence, because the argument for
+        stripping them is genuinely good (``gofmt``, ``rustfmt`` and ``black``
+        all do) and will be made again.
+        """
+        roundtrips("package p {\n\n    struct a {}\n\n}\n")
 
     def test_no_blank_line_is_invented_after_the_opening_brace(self):
         roundtrips("package p {\n    struct a {}\n}\n")
+
+    def test_blank_runs_are_clamped_wherever_they_are(self):
+        """``max_blank_lines`` is the rule that *does* apply here, and it
+        applies at a brace exactly as it does between members."""
+        assert fmt("package p {\n\n\n    struct a {}\n\n\n}\n") == \
+            "package p {\n\n    struct a {}\n\n}\n"
 
 
 class TestNothingIsReordered:
@@ -337,3 +356,81 @@ class TestNoTokenIsEverLost:
     def test_the_tokens_survive(self, src: str):
         violations = list(verify(src, fmt(src)))
         assert not violations, violations
+
+
+class TestTheTrailingCommentFloor:
+    """``T-61`` -- ``S-18``. ``spaces_before_trailing_comment``.
+
+    The option is a **floor**, not a target, and every test here is shaped
+    around that. ``decls._trailing`` carries the *author's* gap through to the
+    alignment pass because by then the source is gone and that gap is the only
+    evidence a block was a deliberate table. The option raises the floor under
+    it and never overwrites a wider one.
+
+    Getting that backwards is the failure the mode cannot survive: hand the
+    alignment pass the same number on every line and ``infer`` finds every
+    block already aligned, so every hand-built comment column is rewritten to
+    the floor while looking considered.
+    """
+
+    RAGGED = ("component a {\n"
+              "    int x; // one\n"
+              "    int yy;   // two\n"
+              "}\n")
+
+    ALIGNED = ("component a {\n"
+               "    int x;   // one\n"
+               "    int yy;  // two\n"
+               "}\n")
+
+    def test_the_default_is_the_status_quo(self):
+        """One space, which is what the corpus writes for a comment that is
+        not part of a column. A mistake in the plumbing shows up here as a
+        changed corpus rather than as a subtle style shift."""
+        assert fmt(self.RAGGED) == (
+            "component a {\n"
+            "    int x; // one\n"
+            "    int yy; // two\n"
+            "}\n")
+
+    def test_a_wider_floor_widens_a_ragged_run(self):
+        assert fmt(self.RAGGED, Style(spaces_before_trailing_comment=4)) == (
+            "component a {\n"
+            "    int x;    // one\n"
+            "    int yy;    // two\n"
+            "}\n")
+
+    @pytest.mark.parametrize("floor", [1, 4])
+    def test_an_aligned_run_keeps_its_own_columns_under_either_value(self, floor):
+        """The property that makes it a floor. ``infer`` reproduces a block
+        its author aligned, and a floor cannot move a column that was already
+        reached -- so this output is the input, at both settings."""
+        assert fmt(self.ALIGNED, Style(spaces_before_trailing_comment=floor)) \
+            == self.ALIGNED
+
+    def test_it_does_not_widen_the_other_columns(self):
+        """The option names one column and must move only that one.
+
+        A declaration's ``=`` is a column stop too, and widening it is a
+        different setting with different evidence behind it. Two stops on one
+        line is the case that tells a per-column floor from a global one.
+        """
+        src = ("component a {\n"
+               "    int x = 1; // one\n"
+               "    int y = 2; // two\n"
+               "}\n")
+        out = fmt(src, Style(spaces_before_trailing_comment=4))
+        assert "int x = 1;    // one" in out
+        assert "int x  = 1" not in out
+
+    def test_zero_is_refused(self):
+        """``int x;// why`` is legal and unreadable, so the floor's floor is
+        one. Refused at construction rather than clamped, for the reason every
+        other nonsensical value here is."""
+        with pytest.raises(ValueError):
+            Style(spaces_before_trailing_comment=0)
+
+    def test_it_is_idempotent(self):
+        style = Style(spaces_before_trailing_comment=4)
+        once = fmt(self.RAGGED, style)
+        assert fmt(once, style) == once

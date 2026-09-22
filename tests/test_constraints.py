@@ -184,17 +184,13 @@ class TestItDeclinesRatherThanGuesses:
     cannot make it -- so the author's text comes back untouched.
     """
 
-    def test_an_if_constraint_is_left_alone(self):
-        """One instance. ``} else {`` versus ``}\\nelse {`` is a brace rule
-        ``docs/style.rst`` does not state, and one example cannot decide."""
-        src = in_constraint("if (len > 1024) { addr % 64 == 0; } else { x; }")
-        assert fmt(src) == src
+    def test_an_unbraced_if_constraint_is_left_alone(self):
+        """``if (a) b < c;`` is legal, and ``S-1`` did not decide it.
 
-    def test_a_foreach_constraint_is_left_alone(self):
-        """One instance, and it is the ``foreach (a[i])`` spelling -- so the
-        corpus holds *zero* measurements of the ``foreach (i : list)`` colon,
-        which would be a fifth colon construct."""
-        src = in_constraint("foreach (chans[i]) { chans[i] < 8; }")
+        Braces cannot be inserted -- that changes the token stream -- and
+        laying the bare item out needs a second decision nobody has made.
+        """
+        src = in_constraint("if (len > 1024)  addr % 64 == 0;")
         assert fmt(src) == src
 
     def test_a_unique_constraint_is_left_alone(self):
@@ -260,17 +256,41 @@ class TestNoTokenIsEverLost:
 def test_the_corpus_constraints_format(request):
     """The coverage number, computed rather than quoted.
 
-    96 of the corpus's 103 constraint body items. The seven that decline are
-    each named in ``pssfmt.rules.constraints`` -- one ``if``, one ``foreach``,
-    one ``unique``, one ``dist``, one braced implication, and the two
-    expressions ``P3-4`` already declined (``**`` and ``>>``). The assertion
-    is on the count so that a *new* kind of decline shows up as a failure
-    rather than as a number nobody re-reads.
+    98 of the corpus's 103 constraint body items, measured on the *one-line
+    statement* path -- this test calls ``emit_span`` directly against
+    ``_ITEM_VOCABULARY`` rather than going through dispatch. The five it
+    counts as declining are, exactly:
+
+    * the ``if`` and the ``foreach`` in ``language-ref/constraints.pss``, and
+      the ``unique`` beside them;
+    * the braced implication and the ``dist`` in ``lexical/operators.pss``.
+
+    **Three of those five are formatted by the tool.** ``S-1`` lays the
+    ``if`` out as a block, ``S-5`` the ``foreach``, and ``S-12`` the
+    ``unique`` through a vocabulary of its own -- and this count sees none of
+    that, because none of it goes through the item path. That is the point of
+    measuring one path rather than the outcome: a decline *here* is a
+    statement about `_ITEM_VOCABULARY`, and the two constructs still declined
+    outright are the braced implication and ``dist``.
+
+    The count has moved twice in this phase, both times for real. ``S-9``
+    took it 7 -> 6 by formatting the corpus's only ``>>``; ``S-8`` took it
+    6 -> 5 by formatting its ``**``.
+
+    Worth stating, because a count that does not move through a landing item
+    reads as a test that is not watching, and here it is the opposite: the
+    count is watching one specific path and saying so.
+
+    The assertion is on the count so that a *new* kind of decline shows up as
+    a failure rather than as a number nobody re-reads.
 
     The total was 102 until pss-corpus completed the three ``pss31/`` files:
     ``templates_and_activity.pss`` now parses and contributes the one item it
-    always contained. The number of *declines* is the load-bearing half of
-    this test and it did not move.
+    always contained; that moved the total and not the declines.
+
+    The declines went 7 -> 6 with ``S-9``, and that one *is* the item: the
+    corpus's only ``>>`` is in a constraint, so this count is where the right
+    shift landing is visible over real code rather than over crafted input.
     """
     corpus = request.config.rootpath / "packages" / "pss-corpus"
     if not corpus.is_dir():
@@ -320,4 +340,116 @@ def test_the_corpus_constraints_format(request):
             stack.extend(reversed(node.children))
 
     assert formatted + declined == 103, (formatted, declined)
-    assert declined == 7, declined
+    assert declined == 5, declined
+
+
+class TestControlItems:
+    """``T-44`` and ``T-48`` in a constraint -- ``S-1`` and ``S-5``.
+
+    One corpus instance each, and both were declined for a *decision* rather
+    than for difficulty: where ``} else {`` goes, and what the iterator colon
+    looks like. Neither is decided here. They are language-wide answers in
+    ``docs/style.rst``, which is why the same two questions unblocked the same
+    two constructs in three separate rule modules.
+    """
+
+    def test_an_if_constraint_cuddles_its_else(self):
+        assert fmt(in_constraint("if(len>1024){addr%64==0;}else{x<2;}")) == \
+            in_constraint(
+                "if (len > 1024) {",
+                "    addr % 64 == 0;",
+                "} else {",
+                "    x < 2;",
+                "}")
+
+    def test_a_chain_does_not_staircase(self):
+        out = fmt(in_constraint("if(a){x<1;}else if(b){x<2;}else{x<3;}"))
+        assert "            } else if (b) {" in out
+        assert "                } else if (b) {" not in out
+
+    def test_a_foreach_constraint_spaces_its_iterator(self):
+        assert fmt(in_constraint("foreach(i:chans){chans[i]<8;}")) == \
+            in_constraint(
+                "foreach (i : chans) {",
+                "    chans[i] < 8;",
+                "}")
+
+    def test_the_colon_less_foreach_still_works(self):
+        """The corpus's only ``foreach`` is this spelling, and the colon is
+        optional in the grammar."""
+        assert fmt(in_constraint("foreach(chans[i]){chans[i]<8;}")) == \
+            in_constraint(
+                "foreach (chans[i]) {",
+                "    chans[i] < 8;",
+                "}")
+
+    def test_a_braced_implication_still_declines(self):
+        """The hazard ``S-12`` was sequenced around, pinned.
+
+        ``TOK_LCBRACE``'s absence from ``_ITEM_VOCABULARY`` was doing two
+        jobs: declining a list brace *and* declining a braced implication.
+        Admitting the brace for ``if`` had to not admit it for these, which
+        is why the brace is scoped to a control vocabulary rather than added
+        to the item one.
+        """
+        src = in_constraint("(x > 0) -> { y > 0; }")
+        assert fmt(src) == src
+
+    def test_it_is_idempotent(self):
+        once = fmt(in_constraint("if(a){x<1;}else{foreach(i:c){c[i]<2;}}"))
+        assert fmt(once) == once
+
+
+class TestTheListBrace:
+    """``T-55`` -- ``S-12``. ``unique {a, b};``.
+
+    Three instances across the corpus -- one ``unique`` and two aggregate
+    literals, in three files -- so the value is argued rather than measured.
+    What it is argued *from* is the point: not ``Site.BRACE_OPEN``'s 7/10,
+    which was measured on declaration bodies, but from every list-like
+    construct PSS does measure. ``f(a, b)`` is 765/767 tight inside,
+    ``packed_s<T, 32>`` is 137/137, ``[1..4096]`` is 18/18. A list brace
+    spaced inside would be the sole exception.
+    """
+
+    @pytest.mark.parametrize("src", [
+        "unique {chans, addrs};", "unique { chans, addrs };",
+        "unique{chans,addrs};",
+    ], ids=["canonical", "spaced", "tight"])
+    def test_every_spelling_lands_on_the_canonical_one(self, src: str):
+        assert fmt(in_constraint(src)) == in_constraint("unique {chans, addrs};")
+
+    def test_the_unbraced_spelling_still_works(self):
+        """``unique_constraint_argument`` is ``'{' list '}' | hierarchical_id``
+        and the corpus's one instance is the braced form."""
+        assert fmt(in_constraint("unique  chans ;")) == \
+            in_constraint("unique chans;")
+
+    def test_a_body_brace_in_the_same_file_keeps_the_body_rule(self):
+        """The test that proves the two sites are genuinely separate.
+
+        ``Site.BRACE_OPEN``'s *after* is 1 -- ``enum e { A, B }`` -- and the
+        list brace's is 0. One file, both braces, and they must disagree.
+        """
+        src = ("package p {\n"
+               "    enum e { A, B }\n"
+               "    struct s {\n"
+               "        constraint k {\n"
+               "            unique {x, y};\n"
+               "        }\n"
+               "    }\n"
+               "}\n")
+        out = fmt(src)
+        assert "enum e { A, B }" in out
+        assert "unique {x, y};" in out
+
+    def test_the_gaps_come_from_the_style(self):
+        out = fmt(in_constraint("unique {chans};"),
+                  Style(spacing_overrides={
+                      Site.LIST_BRACE_OPEN: Spacing(1, 1),
+                      Site.LIST_BRACE_CLOSE: Spacing(1, 0)}))
+        assert "unique { chans };" in out
+
+    def test_it_is_idempotent(self):
+        once = fmt(in_constraint("unique{a,b};"))
+        assert fmt(once) == once

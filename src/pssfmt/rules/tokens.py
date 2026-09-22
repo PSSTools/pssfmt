@@ -78,14 +78,46 @@ tree passes it down. The emitter still never infers anything.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
+from typing import (Any, Callable, Dict, List, Mapping, Optional, Sequence,
+                    Tuple, Union)
 
-from ..layout import (ALIGN_MARK, LINE, SOFTLINE, Layout, concat, group,
-                      indent, text)
-from ..style import Site
+from dataclasses import dataclass
 
-__all__ = ["WORD", "Vocabulary", "must_separate", "floor_gap", "emit_span",
-           "original_gap"]
+from ..layout import (ALIGN_MARK, LINE, SOFTLINE, Layout, align_to, concat,
+                      fill_with, group, indent, text)
+from ..style import BreakMode, Construct, Site
+
+__all__ = ["WORD", "Vocabulary", "Wrap", "must_separate", "floor_gap",
+           "emit_span", "original_gap", "flat_width"]
+
+
+@dataclass(frozen=True)
+class Wrap:
+    """A bracketed list inside a span that may break across lines (``S-16``).
+
+    Everything here is a **code position**, and every one of them comes from
+    the caller's walk of the tree rather than from anything this module
+    infers. That is the same discipline ``sites_at`` follows and for the same
+    reason: a ``,`` is a list separator in an argument list and part of a
+    declarator elsewhere, and a module that guessed from the character would
+    be wrong exactly where it mattered.
+
+    One wrap per span, deliberately. A span holding two lists --
+    ``f(a, b) + g(c, d)`` -- declines to wrap and is emitted flat, which is
+    what it did before this item. Choosing *which* of two lists to break, and
+    in what order, is a policy question with no evidence behind it, and a
+    formatter that answered it by taking the first one would be answering it
+    by accident.
+    """
+
+    #: Whose break policy and continuation indent apply.
+    construct: Construct
+    #: The opening bracket.
+    open_at: int
+    #: The closing bracket.
+    close_at: int
+    #: Each separator inside it -- the ``,`` positions, in order.
+    separators: Tuple[int, ...] = ()
 
 
 class _Word:
@@ -211,7 +243,8 @@ def emit_span(ctx: Any,
               separate: Optional[Callable[..., bool]] = None,
               mark_at: Sequence[int] = (),
               sites_at: Mapping[int, Site] = _NO_SITES,
-              break_at: Optional[int] = None) -> Optional[Layout]:
+              break_at: Optional[int] = None,
+              wrap: Optional[Wrap] = None) -> Optional[Layout]:
     """Code tokens ``first..last`` written out with computed gaps.
 
     *separate* is an extra floor the caller owns, on top of
@@ -284,9 +317,39 @@ def emit_span(ctx: Any,
     byte-identical to one emitted without it; the engine breaks it only when
     it must.
 
-    One break and not a list of them, because "which of several places to
-    break, and in what order" is a policy question ``docs/style.rst``
-    explicitly leaves open, and a ``Fill`` would be answering it by accident.
+    *break_at* is one break and not a list of them. That used to be the whole
+    of the line-breaking story here, on the grounds that "which of several
+    places to break, and in what order" was a policy question
+    ``docs/style.rst`` left open -- and ``S-16`` is the item that answered it,
+    so this docstring would otherwise be arguing against the parameter below.
+
+    *wrap* is a **bracketed list** that may break as a unit: an argument list,
+    a parameter list, a template parameter list, a range list. It is a
+    different shape from *break_at* rather than a generalisation of it --
+    that one continues a line, this one distributes a list -- and the two
+    compose, since a span can hold both.
+
+    What it emits is the shape prettier established and every formatter with
+    a Wadler engine has since::
+
+        group( "(" + indent(softline + items joined by ("," + line))
+                   + softline + ")" )
+
+    All-or-nothing falls out of ``Group`` for free: flat if the whole list
+    fits, otherwise **every** ``Line`` inside breaks. ``pack_arguments =
+    "bin_pack"`` swaps the ``join`` for a ``Fill`` and
+    ``align_after_open_bracket = true`` swaps the ``indent`` for an ``Align``;
+    both were already in the IR, unused, which is why choosing all-or-nothing
+    as the default cost nothing to build and choosing the other would have
+    cost a second engine.
+
+    **The flat rendering is byte-identical to what this function emitted
+    before the wrap existed**, and that is asserted rather than hoped: a
+    ``Line`` renders as one space flat and a ``SoftLine`` as nothing, so the
+    wrap is only taken where the computed gaps are exactly 1 and 0. Under any
+    other style -- a configured space inside call parens, say -- the wrap is
+    declined and the span is emitted as before. A list that fits must not move
+    because a policy for lists that do not fit was added.
     """
     trivia = ctx.trivia
     code = trivia.code_indices
@@ -295,8 +358,20 @@ def emit_span(ctx: Any,
 
     parts: List[Layout] = []
     prev_token = None
+    prev_pos = first - 1
     prev_site: Optional[Site] = None
     broke_at: Optional[int] = None
+    #: parts index of the SoftLine after the wrap's `(`, and of the one
+    #: before its `)`. Recorded during the loop because reassembly needs to
+    #: slice at exactly those two points and nothing else knows where they are.
+    wrap_open: Optional[int] = None
+    wrap_close: Optional[int] = None
+    wrap_seps: List[int] = []
+    wrap_marks: List[Tuple[int, int]] = []
+    if wrap is not None and not (first <= wrap.open_at < wrap.close_at <= last):
+        # A wrap the caller computed for a different span. Refusing beats
+        # slicing at an index that means nothing here.
+        wrap = None
 
     for pos in range(first, last + 1):
         entry = trivia.of(code[pos])
@@ -306,6 +381,17 @@ def emit_span(ctx: Any,
             return None
         # The tree wins where the caller has consulted it: see the module
         # docstring on sites that are not a property of the token type.
+        #
+        # It does *not* win over absence, and `S-10` tried making it do so.
+        # The argument was that `sites_at` is a claim about one position made
+        # by walking the rule that owns it, which is stronger evidence than a
+        # claim about a token type. True, and still the wrong change: the
+        # walk in `pssfmt.rules.exprs` assigns brackets generously, so
+        # trusting it over absence silently un-declined `packed_s<bit[8], 4>`
+        # -- a header `P3-7a` refuses precisely because admitting `[` there
+        # makes `s<A[3:0]>` spellable and its bit-slice colon reachable in a
+        # vocabulary whose `:` means inheritance. The decline was load-bearing
+        # and nothing about the ternary needed it lifted.
         site = sites_at.get(pos) if pos in sites_at else _site(found)
 
         if pos != first:
@@ -316,7 +402,39 @@ def emit_span(ctx: Any,
                     prev_token, token, prev_site, site):
                 gap = 1
             original = original_gap(trivia, code, pos)
-            if pos == break_at:
+            wrapped = _wrap_break(wrap, pos, prev_pos, gap)
+            if wrapped is not None:
+                if prev_pos == wrap.open_at:
+                    wrap_open = len(parts)
+                elif pos == wrap.close_at:
+                    wrap_close = len(parts)
+                else:
+                    wrap_seps.append(len(parts))
+                wrap_marks.append((len(parts), gap))
+                parts.append(wrapped)
+            elif wrap is not None and _wrap_seam(wrap, pos, prev_pos):
+                # A seam of the wrap whose computed gap is not what its break
+                # renders flat -- 0 for a SoftLine, 1 for a Line. Declining
+                # the whole wrap rather than this seam: a list that breaks at
+                # three of its four commas is worse than one that does not
+                # break at all.
+                #
+                # **And the seams already emitted have to be put back**, which
+                # is the half that was missed first time. A SoftLine left
+                # behind outside any group renders as a break, because the
+                # root is broken -- so declining mid-span produced a list that
+                # broke after its opening bracket and nowhere else. Caught by
+                # a comma-tight style, which is the only configuration that
+                # reaches this branch at all.
+                for idx, width in wrap_marks:
+                    parts[idx] = text(" " * width)
+                wrap = None
+                wrap_open = wrap_close = None
+                wrap_seps = []
+                wrap_marks = []
+                if gap:
+                    parts.append(text(" " * gap))
+            elif pos == break_at:
                 broke_at = len(parts)
                 parts.append(LINE if gap else SOFTLINE)
             elif pos in mark_at and gap and original is not None:
@@ -327,8 +445,11 @@ def emit_span(ctx: Any,
             return None
 
         parts.append(text(token.text))
-        prev_token, prev_site = token, site
+        prev_token, prev_site, prev_pos = token, site, pos
 
+    if wrap is not None and wrap_open is not None and wrap_close is not None:
+        return _assemble_wrap(ctx, parts, wrap, wrap_open, wrap_close,
+                              wrap_seps)
     if broke_at is None:
         return concat(parts)
     # `continuation_indent`, not `indent_width`: this is the one place in the
@@ -340,6 +461,100 @@ def emit_span(ctx: Any,
     return group(concat(
         parts[:broke_at]
         + [indent(concat(parts[broke_at:]), ctx.style.continuation_indent)]))
+
+
+def _wrap_seam(wrap: Wrap, pos: int, prev_pos: int) -> bool:
+    """Whether the gap before *pos* is one the wrap owns."""
+    return (prev_pos == wrap.open_at
+            or pos == wrap.close_at
+            or prev_pos in wrap.separators)
+
+
+def _wrap_break(wrap: Optional[Wrap], pos: int, prev_pos: int,
+                gap: int) -> Optional[Layout]:
+    """The break layout for a wrap seam, or ``None`` if this is not one.
+
+    ``None`` is also the answer when the computed gap is not what the break
+    renders flat -- 0 for a ``SoftLine``, 1 for a ``Line``. That guard is what
+    keeps a list that fits byte-identical to what it was before wrapping
+    existed, under **any** style rather than only the shipped one.
+    """
+    if wrap is None or not _wrap_seam(wrap, pos, prev_pos):
+        return None
+    if prev_pos == wrap.open_at or pos == wrap.close_at:
+        return SOFTLINE if gap == 0 else None
+    return LINE if gap == 1 else None
+
+
+def _assemble_wrap(ctx: Any, parts: List[Layout], wrap: Wrap,
+                   open_idx: int, close_idx: int,
+                   sep_idx: Sequence[int]) -> Layout:
+    """The three-piece shape: head, indented body, closing break and tail.
+
+    The leading ``SoftLine`` goes **inside** the indent and the trailing one
+    outside, which is what puts the closing bracket back at the opening
+    line's column rather than at the items'. Getting that the other way round
+    is the classic version of this bug and it is invisible until a list
+    actually breaks.
+    """
+    style = ctx.style
+    body_parts = parts[open_idx:close_idx]
+    if style.break_policy_for(wrap.construct) is BreakMode.FILL and sep_idx:
+        # `bin_pack`. The separators are already `Line` nodes in `parts`; a
+        # `Fill` wants the items and the separators handed over separately, so
+        # the body is re-sliced at exactly those indices. The comma itself
+        # stays with the item before it -- a `Fill` measures each separator
+        # against the *next* item, and a leading comma would measure the wrong
+        # pair.
+        chunks: List[Layout] = []
+        prev = open_idx + 1
+        for idx in sep_idx:
+            chunks.append(concat(parts[prev:idx]))
+            prev = idx + 1
+        chunks.append(concat(parts[prev:close_idx]))
+        body = concat([parts[open_idx], fill_with(LINE, chunks)])
+    else:
+        body = concat(body_parts)
+
+    if style.align_after_open_bracket:
+        inner = align_to(body)
+    else:
+        inner = indent(body, style.continuation_for(wrap.construct))
+    return group(concat(
+        parts[:open_idx] + [inner] + parts[close_idx:]))
+
+
+def flat_width(layout: Layout) -> int:
+    """Columns *layout* occupies rendered flat, counting no line breaks.
+
+    What ``S-17``'s guard needs and the only thing it needs: **would joining
+    this construct produce a line the tool then cannot break?** A `Line`
+    renders as one space flat and a `SoftLine` as nothing, which is what the
+    two additions below say.
+
+    Measured on the built layout rather than estimated from the tokens,
+    because the gaps are the style's and re-deriving them here would be a
+    second implementation of the thing being measured. Cheap: the layouts
+    this is asked about are one construct's worth of text.
+    """
+    from ..layout.ir import Concat, Fill, Group, Indent, Line, Text, Verbatim
+    from ..layout.width import width_of
+
+    total = 0
+    stack = [layout]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Text):
+            total += width_of(node.value)
+        elif isinstance(node, Line):
+            total += 1
+        elif isinstance(node, Verbatim):
+            total += width_of(node.value.split("\n")[0])
+        elif isinstance(node, (Concat, Fill)):
+            stack.extend(node.parts)
+        elif isinstance(node, (Group, Indent)):
+            stack.append(node.contents)
+    return total
 
 
 def _discardable(run: Any) -> bool:

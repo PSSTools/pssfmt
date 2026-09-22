@@ -111,6 +111,15 @@ class Survey:
         self.tab_indent = 0
         self.trailing_ws = 0
         self.blank_runs = collections.Counter()
+        #: Blank lines against a brace, and the files that write them
+        #: (``S-4``). Measured because the *decision* rests on it: stripping
+        #: them was proposed, built, and reverted when this said two
+        #: independent human voices write the after-`{` form. A number a
+        #: deferral rests on has to be reproducible, or the deferral will be
+        #: re-argued from the style guides that disagree with it.
+        self.blank_after_brace = 0
+        self.blank_before_brace = 0
+        self.blank_brace_files = set()
         self.indent_steps = collections.Counter()
         self.brace = collections.Counter()      # 'same-line' / 'own-line'
         self.comment = collections.Counter()    # '//' / '/* */'
@@ -195,6 +204,8 @@ def analyse(sv: Survey, path: Path):
 
     sv.files += 1
     sv.lines += len(lines)
+
+    _blank_lines_at_braces(sv, path, lines)
 
     blank = 0
     for raw in lines:
@@ -322,6 +333,27 @@ def analyse(sv: Survey, path: Path):
     _alignment(sv, toks, by_line, ts)
 
 
+def _blank_lines_at_braces(sv, path, lines):
+    """Blank lines immediately after ``{`` or immediately before ``}``.
+
+    Read from *lines* rather than from tokens, which is the one place this
+    survey does that and needs the exception argued: a blank line is not a
+    token, so there is nothing in the stream to count. The risk the
+    tokens-not-text rule exists to prevent -- counting something inside a
+    comment or a string -- does not arise, because a line that is *empty*
+    cannot be either.
+    """
+    for i in range(len(lines) - 1):
+        here = lines[i].rstrip("\r").rstrip()
+        below = lines[i + 1].rstrip("\r").strip()
+        if here.endswith("{") and not below:
+            sv.blank_after_brace += 1
+            sv.blank_brace_files.add(path)
+        if below == "}" and not here.strip():
+            sv.blank_before_brace += 1
+            sv.blank_brace_files.add(path)
+
+
 def _alignment(sv, toks, by_line, ts):
     """Runs of >=3 consecutive lines sharing a construct: aligned or ragged.
 
@@ -388,6 +420,9 @@ def report(surveys, out=sys.stdout):
         w(f"  braces       {dict(sv.brace)}")
         w(f"  comments     {dict(sv.comment)}")
         w(f"  blank runs   {dict(sorted(sv.blank_runs.items()))}")
+        w(f"  blank at brace  after-{{ {sv.blank_after_brace}   "
+          f"before-}} {sv.blank_before_brace}   "
+          f"files {len(sv.blank_brace_files)}")
         w(f"  alignment    {dict(sv.align)}")
         w("  spacing (n >= 4):")
         for rule in sorted(sv.gap):

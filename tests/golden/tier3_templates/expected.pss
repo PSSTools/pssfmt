@@ -2,7 +2,7 @@
 
 package template_pkg {
 
-    struct packed_s   <   type T , int W = 32 > {
+    struct packed_s<type T, int W = 32> {
         T          value;
         bit[W]     raw;
     }

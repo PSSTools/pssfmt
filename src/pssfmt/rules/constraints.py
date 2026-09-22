@@ -89,10 +89,10 @@ from __future__ import annotations
 
 from typing import Any, Tuple
 
-from ..layout import Layout
+from ..layout import Layout, Verbatim, concat, text
 from ..style import Construct, Site
 from .emit import code_span
-from .exprs import EXPRESSION_VOCABULARY, sites_for
+from .exprs import EXPRESSION_COLON, EXPRESSION_VOCABULARY, sites_for
 from .tokens import WORD, emit_span
 
 #: Keywords that introduce a constraint or one of its items. All word-class:
@@ -118,6 +118,9 @@ _ITEM_VOCABULARY.update({
     "TOK_SEMICOLON": Site.SEMICOLON,
     "TOK_IMPLIES": Site.IMPLICATION,
 })
+# `S-10`: a `:` in a constraint item is a bit slice or a ternary. See
+# `exprs.EXPRESSION_COLON` for the closure argument and what it costs.
+_ITEM_VOCABULARY.update(EXPRESSION_COLON)
 
 #: The rules this module emits as a one-line statement. All of them are
 #: ``<tokens> ;`` and all of them are one line in every corpus instance.
@@ -199,8 +202,13 @@ def _operator_stop(ctx: Any, node: Any) -> Tuple[int, ...]:
     return () if span is None else (span[0],)
 
 
-def _statement(ctx: Any, node: Any) -> Layout:
-    """*node* written out on one line, or reproduced if it is not ours."""
+def _statement(ctx: Any, node: Any, vocabulary: Any = None) -> Layout:
+    """*node* written out on one line, or reproduced if it is not ours.
+
+    *vocabulary* defaults to :data:`_ITEM_VOCABULARY`. ``S-12``'s ``unique``
+    passes its own, so that the brace it needs stays out of the set whose
+    omission of that brace is still declining braced implications.
+    """
     span = code_span(ctx.trivia, node)
     if span is None:
         return _reproduce(ctx, node)
@@ -214,9 +222,22 @@ def _statement(ctx: Any, node: Any) -> Layout:
     # A callback here was written, ran 155 times over the corpus, and returned
     # true zero times; dead code that adds a space reads as a decision somebody
     # made, and this one nobody had to.
-    emitted = emit_span(ctx, span[0], span[1], _ITEM_VOCABULARY,
+    emitted = emit_span(ctx, span[0], span[1],
+                        vocabulary or _ITEM_VOCABULARY,
                         sites_at=sites, mark_at=_operator_stop(ctx, node))
     return emitted if emitted is not None else _reproduce(ctx, node)
+
+
+def _unique(ctx: Any, node: Any) -> Layout:
+    """``unique {a, b};`` -- a one-line statement with a list brace (``S-12``).
+
+    ``unique_constraint_argument`` is
+    ``'{' hierarchical_id_list '}' | hierarchical_id``, so both spellings are
+    a run of tokens ending in ``;`` and this is :func:`_statement` with one
+    more vocabulary entry. The decision is which site that entry names, and
+    it is argued in :data:`_UNIQUE_VOCABULARY`.
+    """
+    return _statement(ctx, node, vocabulary=_UNIQUE_VOCABULARY)
 
 
 def _reproduce(ctx: Any, node: Any) -> Layout:
@@ -225,6 +246,142 @@ def _reproduce(ctx: Any, node: Any) -> Layout:
     from .decls import _reproduce as reproduce
 
     return reproduce(ctx, node)
+
+
+#: ``if (a > 0) {`` and ``foreach (i : list) {`` inside a constraint block.
+#:
+#: A separate vocabulary from :data:`_ITEM_VOCABULARY`, and the separation is
+#: the point rather than a convenience: ``TOK_LCBRACE`` is admissible *here*
+#: and stays out of the item vocabulary, where its absence is still what
+#: declines a braced implication (``(a > 0) -> { b > 0; c > 0; }``). Scoping
+#: the brace per rule rather than per module is what let ``S-1`` and ``S-12``
+#: land without one silently un-declining the other's construct.
+#: ``unique {chans, addrs};`` (``S-12``).
+#:
+#: Its own vocabulary for the same reason the control one has its own: the
+#: brace is admissible *here* and nowhere else in this module, so admitting
+#: it cannot un-decline the braced implication that
+#: :data:`_ITEM_VOCABULARY`'s omission is still refusing.
+#:
+#: ``Site.LIST_BRACE_*`` rather than ``BRACE_*``, and that is the whole
+#: decision: 725 declaration bodies measured one answer for a brace that
+#: opens a *body*, and this one delimits a list. Every list-like construct
+#: the corpus does measure is tight inside.
+_UNIQUE_VOCABULARY = dict(_ITEM_VOCABULARY)
+_UNIQUE_VOCABULARY["TOK_UNIQUE"] = WORD
+_UNIQUE_VOCABULARY["TOK_LCBRACE"] = Site.LIST_BRACE_OPEN
+_UNIQUE_VOCABULARY["TOK_RCBRACE"] = Site.LIST_BRACE_CLOSE
+
+_CONTROL_VOCABULARY = dict(_ITEM_VOCABULARY)
+_CONTROL_VOCABULARY.update((name, WORD) for name in ("TOK_IF", "TOK_FOREACH"))
+_CONTROL_VOCABULARY["TOK_LCBRACE"] = Site.BRACE_OPEN
+
+#: Each control item's own parens -- and ``foreach``'s own colon, which is its
+#: **direct** terminal, so a colon deeper in the expression keeps the item
+#: vocabulary's bit-slice answer. Same mechanism as ``default y == 2;``.
+_CONTROL_SITES = {
+    "if_constraint_item": {
+        "TOK_LPAREN": Site.CONTROL_PAREN_OPEN,
+        "TOK_RPAREN": Site.CONTROL_PAREN_CLOSE,
+    },
+    "foreach_constraint_item": {
+        "TOK_LPAREN": Site.CONTROL_PAREN_OPEN,
+        "TOK_RPAREN": Site.CONTROL_PAREN_CLOSE,
+        "TOK_COLON": Site.COLON_ITERATOR,
+    },
+}
+
+
+def _constraint_block_of(node: Any) -> Any:
+    """The braced ``constraint_set`` before any ``else``, or ``None``.
+
+    ``constraint_set`` is ``constraint_body_item | constraint_block``, and
+    only the second is braced -- ``if (a) b < c;`` is legal and is the
+    unbraced branch this module declines for the same reason
+    ``pssfmt.rules.procedural`` does: laying it out needs a second decision
+    and inserting braces would change the token stream.
+    """
+    from .decls import _effective
+
+    for child in node.children:
+        if not child.is_rule:
+            if getattr(child.token, "type_name", None) == "TOK_ELSE":
+                return None
+            continue
+        if child.rule_name != "constraint_set":
+            continue
+        inner = _effective(child)
+        return inner if getattr(inner, "rule_name", None) == "constraint_block" \
+            else None
+    return None
+
+
+def _else_set(node: Any) -> Any:
+    """Whatever follows ``else``, braced or not, or ``None`` if there is none."""
+    from .decls import _effective
+
+    seen_else = False
+    for child in node.children:
+        if not child.is_rule:
+            if getattr(child.token, "type_name", None) == "TOK_ELSE":
+                seen_else = True
+            continue
+        if child.rule_name == "constraint_set" and seen_else:
+            return _effective(child)
+    return None
+
+
+def _clean_before(ctx: Any, pos: int) -> bool:
+    """Whitespace only before code position *pos*. See
+    ``procedural._nothing_but_whitespace_before`` for what this prevents."""
+    code = ctx.trivia.code_indices
+    if pos <= 0 or pos >= len(code):
+        return False
+    run = list(ctx.trivia.of(code[pos - 1]).raw_trailing) \
+        + list(ctx.trivia.of(code[pos]).raw_leading)
+    return all(not tok.text.strip() for tok in run)
+
+
+def _control(ctx: Any, node: Any) -> Layout:
+    """``if (…) { … } else { … }`` and ``foreach (…) { … }`` (``S-1``, ``S-5``).
+
+    One instance each in the corpus, and both were declined for a decision
+    rather than for difficulty: where ``} else {`` goes, and what the iterator
+    colon looks like. Both are decided now, and neither is decided *here* --
+    they are language-wide answers in ``docs/style.rst``, which is why the
+    same two questions unblocked the same two constructs in three modules.
+    """
+    from .decls import _block
+
+    body = _constraint_block_of(node)
+    if body is None:
+        return _reproduce(ctx, node)
+    sites = sites_for(ctx, node, extra_rules=_CONTROL_SITES)
+    if sites is None:
+        return _reproduce(ctx, node)
+
+    tail = None
+    otherwise_set = _else_set(node)
+    if otherwise_set is not None:
+        name = getattr(otherwise_set, "rule_name", None)
+        if name == "if_constraint_item":
+            otherwise = _control(ctx, otherwise_set)
+        elif name == "constraint_block":
+            otherwise = _block(ctx, otherwise_set, Construct.CONSTRAINT_IF_BODY)
+        else:
+            return _reproduce(ctx, node)
+        span = code_span(ctx.trivia, body)
+        if span is None or not _clean_before(ctx, span[1] + 1) \
+                or not _clean_before(ctx, span[1] + 2) \
+                or isinstance(otherwise, Verbatim):
+            return _reproduce(ctx, node)
+        tail = concat([
+            text(" " * ctx.style.gap(Site.BLOCK_TAIL, None) + "else"
+                 + " " * ctx.style.gap(None, Site.BLOCK_TAIL)),
+            otherwise,
+        ])
+    return _block(ctx, node, Construct.CONSTRAINT_IF_BODY, body=body,
+                  vocabulary=_CONTROL_VOCABULARY, sites=sites, tail=tail)
 
 
 def _block_of(node: Any) -> Any:
@@ -248,5 +405,8 @@ def _declaration(ctx: Any, node: Any) -> Layout:
 def register(registry) -> None:
     """Binds this module's builders. See ``decls.register`` on why a function."""
     registry.register("constraint_declaration", _declaration)
+    registry.register("unique_constraint_item", _unique)
+    registry.register("if_constraint_item", _control)
+    registry.register("foreach_constraint_item", _control)
     for rule_name in _ITEM_RULES:
         registry.register(rule_name, _statement)

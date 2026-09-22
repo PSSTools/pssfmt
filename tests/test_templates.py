@@ -209,51 +209,6 @@ class TestNestingLexesBack:
 
 class TestItDeclinesRatherThanGuesses:
 
-    def test_a_template_parameter_declaration_is_left_alone(self):
-        """The decline that had to be positive.
-
-        Its tokens are all in the header vocabulary now, so nothing about the
-        *vocabulary* refuses it. It declines because ``sites_for`` assigns no
-        site to a ``template_param_decl_list``'s angles and the completeness
-        check will not let an unaccounted-for ``<`` through -- an absent
-        answer, rather than a rule that says "not this one".
-
-        And it should decline: 7/16 tight after the ``<`` is not a
-        measurement, it is a disagreement, and 5 of the 16 put the parameter
-        on its own line -- which joining would destroy.
-        """
-        src = ("package p {\n    struct base_s <struct TRAIT : t_s = e_s> {\n"
-               "        int x;\n    }\n}\n")
-        assert fmt(src) == src
-
-    def test_a_parameter_declaration_the_vocabulary_would_accept(self):
-        """The case that isolates the refusal from everything else.
-
-        ``<struct TRAIT : t_s>`` is made *entirely* of tokens the header
-        vocabulary now names -- ``struct``, an identifier, a colon, another
-        identifier -- so nothing about the vocabulary objects to it, and the
-        only thing left declining it is ``sites_for`` refusing the subtree.
-        The test above declines for a second reason as well (its ``=``), so it
-        keeps passing when that refusal is removed. This one does not.
-
-        What the refusal prevents is not a crash. It is ``base_s<struct TRAIT
-        : t_s>`` emitted with that ``:`` spaced as *inheritance*, which is a
-        different construct wearing the same character -- the exact failure
-        the architecture calls "wrong rather than absent".
-        """
-        src = ("package p {\n    struct base_s < struct TRAIT : t_s > {\n"
-               "        int x;\n    }\n}\n")
-        assert fmt(src) == src
-
-    def test_a_wrapped_parameter_declaration_keeps_its_line(self):
-        """The corpus writes this, in two files, eight times."""
-        src = ("package p {\n"
-               "    struct addr_claim_s <\n"
-               "            struct TRAIT : addr_trait_s = empty_addr_trait_s> {\n"
-               "        int x;\n"
-               "    }\n}\n")
-        assert fmt(src) == src
-
     def test_a_bracket_inside_the_arguments_declines_the_header(self):
         """``packed_s<bit[8], 4>`` -- 6 instances in 4 files, and left alone.
 
@@ -415,3 +370,94 @@ class TestTheGapsComeFromTheStyle:
             "package p {\n    struct s : base_s<a, b> {\n"
             "        int x;\n    }\n}\n",
             style)
+
+
+class TestTheDeclaringSide:
+    """``T-50`` -- ``S-7``. Template parameter *declarations*.
+
+    ``docs/style.rst`` left these alone in as many words: 16 instances in 5
+    files, and *they do not agree* -- 7 of 16 are tight after the ``<``
+    because 5 of the rest put the parameter on a line of its own. That is not
+    a split about the angle brackets; it is a split about **line breaking**,
+    and the two halves were separated by giving the list a break policy
+    (``S-16``) and then deciding the spacing here.
+
+    Every gap this construct needs was already measured on something else:
+    the angles from the argument list (137/137 tight), the bound colon from
+    inheritance (355/358 spaced), the default ``=`` from ``Site.ASSIGN``
+    (271/319). Not one new site.
+    """
+
+    @pytest.mark.parametrize("src,expected", [
+        ("struct s <type T> {", "struct s<type T> {"),
+        ("struct s < type T , int N > {", "struct s<type T, int N> {"),
+        ("struct s<int W=8> {", "struct s<int W = 8> {"),
+    ], ids=["spaced-angle", "wide", "default"])
+    def test_the_angles_take_the_argument_list_s_rule(self, src, expected):
+        out = fmt("package p {\n    %s\n        int x;\n    }\n}\n" % src)
+        assert "    " + expected in out
+
+    def test_the_bound_colon_takes_the_inheritance_rule(self):
+        """``struct TRAIT : addr_trait_s`` -- and it is not a sixth reading
+        of ``:``. What follows a bound colon is the type the parameter is
+        bounded by, which is what an inheritance colon separates too."""
+        out = fmt("package p {\n"
+                  "    struct base_s <struct TRAIT:addr_trait_s = e_s> {\n"
+                  "        int x;\n    }\n}\n")
+        assert "    struct base_s<struct TRAIT : addr_trait_s = e_s> {" in out
+
+    def test_a_declaration_and_a_use_agree(self):
+        """The point of sharing the site rather than inventing one: the two
+        sides of the same template come out the same shape."""
+        out = fmt("package p {\n"
+                  "    struct base_s <type T> {\n        int x;\n    }\n"
+                  "    struct d_s : base_s <int> {\n        int y;\n    }\n}\n")
+        assert "struct base_s<type T> {" in out
+        assert "struct d_s : base_s<int> {" in out
+
+    def test_a_comparison_elsewhere_stays_spaced(self):
+        """``<`` is ``TOK_LT`` and so is a comparison. Same token type,
+        opposite measured answers, and the tree is what tells them apart."""
+        out = fmt("package p {\n    struct s <int W> {\n"
+                  "        bool b = a < W;\n    }\n}\n")
+        assert "struct s<int W> {" in out
+        assert "bool b = a < W;" in out
+
+    def test_a_long_parameter_list_breaks(self):
+        """``S-16``'s half of the item, and the reason ``S-7`` had to wait
+        for it: 5 of the corpus's 16 put each parameter on its own line, and
+        joining those without a break policy is what ``P3-11a`` refused to
+        do to a wrapped prototype."""
+        out = fmt("package p {\n"
+                  "    struct addr_claim_s <struct TRAIT : addr_trait_s = "
+                  "empty_addr_trait_s, type U = int> {\n"
+                  "        int x;\n    }\n}\n")
+        assert "    struct addr_claim_s<\n" in out
+        assert "        struct TRAIT : addr_trait_s = empty_addr_trait_s,\n" in out
+        assert "\n    > {\n" in out
+
+    def test_a_header_with_two_lists_keeps_the_author_s_wrap(self):
+        """``emit_span`` takes one wrap, and this header has two -- the
+        parameter list and the base type's argument list. Joining it would
+        make a 108-column line with nowhere to break, so the author's line
+        stands. Worse than a rule, better than a violated width."""
+        src = ("package p {\n"
+               "    struct transparent_addr_claim_s<\n"
+               "            struct TRAIT : addr_trait_s = empty_addr_trait_s>"
+               " : addr_claim_s<TRAIT> {\n"
+               "        rand bit[64] addr;\n"
+               "    }\n}\n")
+        assert "    struct transparent_addr_claim_s<\n" in fmt(src)
+
+    def test_a_short_header_the_author_wrapped_is_still_joined(self):
+        """The guard is about width, not about wrapping. Joining a wrapped
+        header is what ``P3-2b`` built this path for."""
+        out = fmt("package p {\n    struct s\n    <type T>\n    {\n"
+                  "        int x;\n    }\n}\n")
+        assert "    struct s<type T> {" in out
+
+    def test_it_is_idempotent(self):
+        src = ("package p {\n    struct base_s <struct TRAIT : t_s = e_s> {\n"
+               "        int x;\n    }\n}\n")
+        once = fmt(src)
+        assert fmt(once) == once

@@ -234,6 +234,28 @@ class TestEveryOptionDoesSomething:
                 "    int     zz;\n"
                 "}\n")
 
+    #: ``spaces_before_trailing_comment`` needs a source of its own too, and
+    #: for a reason worth stating: the comments have to be **ragged**. On an
+    #: already-aligned run ``infer`` reproduces the author's columns and the
+    #: option is correctly invisible -- it is a floor, not a target -- so a
+    #: probe built from an aligned table would pass for a formatter that read
+    #: the key and did nothing with it.
+    COMMENTS = ("component a {\n"
+                "    int x; // one\n"
+                "    int yy;   // two\n"
+                "}\n")
+
+    #: The two ``S-16`` options need a source whose list **does not fit**.
+    #: A list that fits is byte-identical under every one of them -- that is
+    #: the property the item is built on -- so a probe from a short call would
+    #: pass for a formatter that read both keys and ignored them.
+    WRAPPED = ("component a {\n"
+               "    function void g() {\n"
+               '        message(NONE, "a call long enough to need breaking '
+               'across lines", n, n, n);\n'
+               "    }\n"
+               "}\n")
+
     #: ``(key, TOML text, source, extra options both sides share)``.
     #:
     #: The shared options exist for ``continuation_indent``, which cannot be
@@ -250,6 +272,11 @@ class TestEveryOptionDoesSomething:
         ("insert_final_newline", "insert_final_newline = false", LONG, ""),
         ("line_ending", 'line_ending = "crlf"', LONG, ""),
         ("optional_semicolon", 'optional_semicolon = "preserve"', SEMICOLON, ""),
+        ("spaces_before_trailing_comment",
+         "spaces_before_trailing_comment = 4", COMMENTS, ""),
+        ("pack_arguments", 'pack_arguments = "bin_pack"', WRAPPED, ""),
+        ("align_after_open_bracket", "align_after_open_bracket = true",
+         WRAPPED, ""),
         ("alignment", 'alignment = "flush-left"', TABLE, ""),
         ("alignment_group_boundary", 'alignment_group_boundary = "none"',
          BOUNDARY, ""),
@@ -410,10 +437,18 @@ class TestTheSchemaMatchesStyle:
         added here and not there is an undocumented option, which is how a
         small config surface stops being small."""
         assert {option.name for option in OPTIONS} == {
+            # `spaces_before_trailing_comment` is the first key added after
+            # section 6.7 was written (`S-18`), and it is here rather than
+            # there because the decision record `STYLE-OPEN-QUESTIONS.md` is
+            # what asked for it. The equality still means what it meant: a
+            # documented option the config cannot set, or a settable option
+            # nothing documents, both fail.
             "version", "style", "extends",
             "print_width", "indent_width", "continuation_indent", "use_tabs",
             "brace_style", "max_blank_lines", "insert_final_newline",
             "line_ending", "optional_semicolon",
+            "spaces_before_trailing_comment",
+            "pack_arguments", "align_after_open_bracket",
             "alignment", "alignment_group_boundary",
             "overrides",
         }

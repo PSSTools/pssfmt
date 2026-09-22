@@ -22,15 +22,18 @@ pre-commit hook, and most formatters never write it down:
   no-op is survivable; one that occasionally corrupts is not.
 
 The first two are enforced over the whole shared PSS test corpus: 92 files, of
-which 64 are already byte-identical to what `pssfmt` would write, 28 are
+which 36 are already byte-identical to what `pssfmt` would write, 56 are
 reformatted, and none trip the fail-safe. Every one is idempotent.
 
 ## What it formats
 
 Declarations and their bodies and headers, `extend` blocks, `import`
 statements, field declarations, expressions, constraints, activities, template
-arguments, `enum` declarations, function prototypes and bodies, the statements
-inside them, `match`, and `exec` bodies.
+arguments and template *parameters*, `enum` declarations, function prototypes
+and bodies, the statements inside them, `if`/`else`, loops, `match`, and
+`exec` bodies — and **line breaking**: a call, parameter list or range that
+does not fit inside `print_width` is broken, and one you wrapped yourself is
+joined and re-broken from its content.
 
 Everything else is reproduced exactly as you wrote it. That is the design
 rather than a stage of it: a construct with no rule falls back to the formatter

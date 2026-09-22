@@ -85,6 +85,7 @@ from .style import (
     DEFAULT_STYLE,
     BraceMode,
     LineEnding,
+    PackMode,
     SemicolonMode,
     Style,
 )
@@ -362,6 +363,16 @@ OPTIONS: Tuple[Option, ...] = (
     Option("optional_semicolon", "optional_semicolon",
            _choice("optional_semicolon", SemicolonMode),
            "what to do with a `;` PSS does not require"),
+
+    Option("spaces_before_trailing_comment", "spaces_before_trailing_comment",
+           _integer("spaces_before_trailing_comment", 1),
+           "the minimum columns before a trailing `// comment`"),
+
+    Option("pack_arguments", "pack_arguments", _choice("pack_arguments", PackMode),
+           "how a list that does not fit distributes its items"),
+    Option("align_after_open_bracket", "align_after_open_bracket",
+           _boolean("align_after_open_bracket"),
+           "line a broken list's items up under the open bracket"),
 
     Option("alignment", "alignment", _choice("alignment", AlignMode),
            "how columns within a group of lines are aligned"),

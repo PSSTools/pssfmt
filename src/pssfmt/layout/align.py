@@ -115,6 +115,11 @@ def strip_marks(text: str) -> str:
     return text.replace(ALIGN_MARK, "")
 
 
+#: A cell whose content is a comment. Used for one thing: giving the
+#: trailing-comment column its own minimum spacing (``S-18``).
+_IS_COMMENT = re.compile(r"^(//|/\*)")
+
+
 def align_text(
     text: str,
     *,
@@ -122,23 +127,42 @@ def align_text(
     boundary: GroupBoundary = GroupBoundary.BLANK_LINES,
     print_width: int = 100,
     min_spacing: int = _DEFAULT_MIN_SPACING,
+    comment_spacing: Optional[int] = None,
 ) -> str:
     """Resolve every column stop in ``text``.
 
     ``text`` is the engine's output, complete with :data:`ALIGN_MARK`
     sentinels. The result contains none.
+
+    *comment_spacing* is ``min_spacing`` for a cell that **is** a comment, and
+    it exists because ``spaces_before_trailing_comment`` (``S-18``) is an
+    option about one column rather than about all of them. Raising
+    ``min_spacing`` instead would widen the ``=`` of a declaration and the
+    statement after a ``match`` arm's ``:`` too, which is a different setting
+    with different evidence behind it.
+
+    A per-column minimum rather than a per-column *target*: this only ever
+    raises the floor a flushed or freshly-computed column lands on. It cannot
+    move a column the author built, because ``infer`` reproduces those
+    untouched.
+
+    ``None`` means "the same as ``min_spacing``", so a caller that does not
+    care passes nothing and nothing changes.
     """
     if ALIGN_MARK not in text:
         return text
     if mode is AlignMode.PRESERVE:
         return strip_marks(text)
 
+    if comment_spacing is None:
+        comment_spacing = min_spacing
     lines = text.split("\n")
     parsed = [_parse_line(line) for line in lines]
 
     out: List[str] = [None] * len(lines)  # type: ignore[list-item]
     for start, stop in _groups(lines, parsed, boundary):
-        _resolve_group(lines, parsed, start, stop, mode, print_width, min_spacing, out)
+        _resolve_group(lines, parsed, start, stop, mode, print_width,
+                       min_spacing, comment_spacing, out)
 
     for i, line in enumerate(lines):
         if out[i] is None:
@@ -289,6 +313,7 @@ def _resolve_group(
     mode: AlignMode,
     print_width: int,
     min_spacing: int,
+    comment_spacing: int,
     out: List[str],
 ) -> None:
     members = [i for i in range(start, stop) if parsed[i].marked]
@@ -325,15 +350,18 @@ def _resolve_group(
                 for i in run:
                     out[i] = lines[i].replace(ALIGN_MARK, "")
             else:
-                _emit_flush_left(parsed, run, min_spacing, out)
+                _emit_flush_left(parsed, run, min_spacing,
+                                 comment_spacing, out)
         return
 
     if mode is AlignMode.FLUSH_LEFT:
-        _emit_flush_left(parsed, members, min_spacing, out)
+        _emit_flush_left(parsed, members, min_spacing, comment_spacing, out)
         return
 
-    targets = _column_targets(parsed, members, min_spacing)
-    rendered = {i: _emit_with_targets(parsed[i], targets, min_spacing) for i in members}
+    targets = _column_targets(parsed, members, min_spacing, comment_spacing)
+    rendered = {i: _emit_with_targets(parsed[i], targets, min_spacing,
+                                      comment_spacing)
+                for i in members}
 
     # Abandon alignment rather than overflow (verible's rule) -- but only when
     # alignment is what causes the overflow. A block containing one inherently
@@ -341,7 +369,8 @@ def _resolve_group(
     # cannot fix, which is a strictly worse result for the same overflow.
     if any(width_of(t) > print_width for t in rendered.values()):
         flush: List[str] = list(out)
-        _emit_flush_left(parsed, members, min_spacing, flush)
+        _emit_flush_left(parsed, members, min_spacing, comment_spacing,
+                         flush)
         if all(width_of(flush[i]) <= print_width for i in members):
             for i in members:
                 out[i] = flush[i]
@@ -448,7 +477,8 @@ def _was_aligned(parsed: Sequence[_Line], members: Sequence[int]) -> bool:
 
 
 def _column_targets(
-    parsed: Sequence[_Line], members: Sequence[int], min_spacing: int
+    parsed: Sequence[_Line], members: Sequence[int], min_spacing: int,
+    comment_spacing: int,
 ) -> List[int]:
     """Left-to-right column positions for each stop in the group.
 
@@ -465,18 +495,32 @@ def _column_targets(
         participants = [i for i in members if col < len(parsed[i].cells)]
         if not participants:
             continue
-        target = max(running[i] + min_spacing for i in participants)
+        target = max(running[i] + _floor(parsed[i].cells[col], min_spacing,
+                                         comment_spacing)
+                     for i in participants)
         targets[col] = target
         for i in participants:
             running[i] = target + width_of(parsed[i].cells[col])
     return targets
 
 
-def _emit_with_targets(p: _Line, targets: Sequence[int], min_spacing: int) -> str:
+def _floor(cell: str, min_spacing: int, comment_spacing: int) -> int:
+    """The minimum gap before *cell* -- wider for a trailing comment.
+
+    ``S-18`` is an option about one column, so the floor is chosen from what
+    the cell *is* rather than from its index. Index would be wrong: a
+    declaration puts its comment in column 3 and a bind statement in column 2.
+    """
+    return comment_spacing if _IS_COMMENT.match(cell) else min_spacing
+
+
+def _emit_with_targets(p: _Line, targets: Sequence[int], min_spacing: int,
+                       comment_spacing: int) -> str:
     parts = [p.cells[0]]
     col = width_of(p.cells[0])
     for idx in range(1, len(p.cells)):
-        pad = max(targets[idx] - col, min_spacing)
+        pad = max(targets[idx] - col,
+                  _floor(p.cells[idx], min_spacing, comment_spacing))
         parts.append(" " * pad)
         parts.append(p.cells[idx])
         col = (col + pad) + width_of(p.cells[idx])
@@ -484,13 +528,13 @@ def _emit_with_targets(p: _Line, targets: Sequence[int], min_spacing: int) -> st
 
 
 def _emit_flush_left(
-    parsed: Sequence[_Line], members: Sequence[int], min_spacing: int, out: List[str]
+    parsed: Sequence[_Line], members: Sequence[int], min_spacing: int,
+    comment_spacing: int, out: List[str]
 ) -> None:
-    pad = " " * min_spacing
     for i in members:
         p = parsed[i]
         parts = [p.cells[0]]
         for cell in p.cells[1:]:
-            parts.append(pad)
+            parts.append(" " * _floor(cell, min_spacing, comment_spacing))
             parts.append(cell)
         out[i] = "".join(parts)

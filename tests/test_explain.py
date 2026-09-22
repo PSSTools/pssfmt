@@ -218,6 +218,14 @@ class TestSpans:
         # What still copies in them is the same three constructs that copy
         # everywhere else in the corpus, which is why the file count is
         # unchanged at 36 -- none of the three dropped to zero.
+        #
+        # Unmoved by phase S, and one item is worth naming for it. `S-3` lays
+        # out the corpus's one *inline* anonymous activity sequence block,
+        # which was previously copied -- and the count does not change,
+        # because `explain` attributes the three lines it becomes to the rule
+        # that produced them while the file goes on copying the same other
+        # constructs it always did. A construct leaving the copied set is not
+        # the same as a *line* leaving it.
         assert (total, files) == (309, 36), (
             "%d lines across %d files report copied text, expected 309/36"
             % (total, files))

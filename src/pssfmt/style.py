@@ -43,6 +43,14 @@ tightness against a spaced neighbour. No rule measured over the corpus needs
 to, and a site that did would be describing a two-token pattern rather than a
 token, which belongs in the rule module that knows both.
 
+That limit is about *a* site, and the distinction turned out to matter. A
+two-token operator gets **two** sites, and the pair says between them what
+neither can say alone -- ``Site.SHIFT_RIGHT_OPEN`` and ``SHIFT_RIGHT_CLOSE``
+render ``a >> b`` spaced outside and tight between, under exactly the
+composition rule above. So the limit is on how much one member can express,
+not on which rules are expressible. ``>>`` was declined on the stronger
+reading of it, by this docstring and by ``docs/style.rst`` both.
+
 Where the defaults come from
 ----------------------------
 Every default in this module is a measured value, not a preference. The
@@ -68,6 +76,7 @@ __all__ = [
     "Spacing",
     "BraceMode",
     "BreakMode",
+    "PackMode",
     "LineEnding",
     "SemicolonMode",
     "AlignMode",
@@ -145,6 +154,11 @@ class Construct(str, Enum):
     # -- Tier 2: procedural statements (P3-11b)
     MATCH_BODY = "match_body"
 
+    # -- Tier 2: procedural control flow (S-1, S-5)
+    IF_BODY = "if_body"
+    ELSE_BODY = "else_body"
+    LOOP_BODY = "loop_body"
+
     # -- Tier 3: verbatim (P3-8)
     EXEC_BODY = "exec_body"
 
@@ -178,9 +192,25 @@ class Site(str, Enum):
     EQUALITY = "equality"                      # == !=
     LOGICAL = "logical"                        # && ||
     BITWISE = "bitwise"                        # & | ^
-    SHIFT = "shift"                            # << >>
+    SHIFT = "shift"                            # <<
     IMPLICATION = "implication"                # ->
     UNARY = "unary"                            # + - ! ~
+    # `a >> b`. Two members for *one* operator, because PSS has no `>>` token:
+    # `shift_op` is `TOK_GT TOK_GT`, two tokens that must be written touching
+    # inside an operator that is spaced. See DEFAULT_SPACING.
+    SHIFT_RIGHT_OPEN = "shift_right_open"      # the first `>`
+    SHIFT_RIGHT_CLOSE = "shift_right_close"    # the second
+    # `p ? a : b`. The colon is its own site rather than a fifth reading of
+    # COLON_*, because it is not a colon *construct* -- it is the second half
+    # of a ternary operator that happens to be spelled with one.
+    TERNARY_COND = "ternary_cond"              # ?
+    COLON_TERNARY = "colon_ternary"            # :
+    VARARGS = "varargs"                        # int... args
+    # `**`. Two members for one operator, and the *only* pair in this enum
+    # chosen by the shape of what surrounds it rather than by the tokens
+    # themselves. See DEFAULT_SPACING.
+    EXPONENT = "exponent"                      # x**2
+    EXPONENT_WIDE = "exponent_wide"            # base ** f(n)
 
     # -- Brackets
     CALL_PAREN_OPEN = "call_paren_open"
@@ -199,12 +229,22 @@ class Site(str, Enum):
     TEMPLATE_ANGLE_CLOSE = "template_angle_close"
     BRACE_OPEN = "brace_open"
     BRACE_CLOSE = "brace_close"
+    # `unique {a, b}`, `{1, 2, 3}` -- a brace delimiting a *list*, which is a
+    # different construct from a declaration body that happens to share the
+    # character. Kept separate for the reason SET_BRACKET is kept separate
+    # from INDEX_BRACKET.
+    LIST_BRACE_OPEN = "list_brace_open"
+    LIST_BRACE_CLOSE = "list_brace_close"
+    # `} else {`, `} while (e);` -- a keyword written after a closing brace on
+    # the same line. One site because it is one style question asked twice.
+    BLOCK_TAIL = "block_tail"
 
-    # -- The four colons (docs/style.rst, "Colons: four constructs, four rules")
+    # -- The colons (docs/style.rst, "Colons: five constructs, five rules")
     COLON_BIT_SLICE = "colon_bit_slice"
     COLON_CASE_ITEM = "colon_case_item"
     COLON_INHERITANCE = "colon_inheritance"
     COLON_LABEL = "colon_label"
+    COLON_ITERATOR = "colon_iterator"          # foreach (i : list)
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +337,35 @@ class SemicolonMode(str, Enum):
     REQUIRE = "require"
 
 
+class PackMode(str, Enum):
+    """How a list that does not fit distributes its items (``S-16a``).
+
+    Two answers, and they are not variations of one rule -- they are the two
+    line-breaking philosophies, and choosing between them is the largest
+    single style decision after the width itself::
+
+        never                       bin_pack
+        -----                       --------
+        f(                          f(alpha, beta,
+            alpha,                    gamma);
+            beta,
+            gamma
+        );
+
+    ``NEVER`` is what a :class:`~pssfmt.layout.ir.Group` already means: flat
+    if the whole list fits, otherwise **every** separator breaks. ``BIN_PACK``
+    is a :class:`~pssfmt.layout.ir.Fill`: break only where the next item does
+    not fit.
+    """
+
+    #: All or nothing. One item per line when it breaks at all, so a diff
+    #: touching one argument touches one line.
+    NEVER = "never"
+    #: Greedy packing -- LLVM's shape, and clang-format's ``BinPackArguments``
+    #: default. Fewer lines; a diff touching one argument can reflow the rest.
+    BIN_PACK = "bin_pack"
+
+
 class LineEnding(str, Enum):
     """Line terminator for emitted files."""
 
@@ -330,10 +399,60 @@ DEFAULT_SPACING: Mapping[Site, Spacing] = MappingProxyType({
     Site.COMPARISON: SPACED,                     # 128/130
     Site.EQUALITY: SPACED,                       # 48/48
     Site.LOGICAL: SPACED,                        # 14/14
-    Site.BITWISE: SPACED,                        # undecided; binary-operator rule
-    Site.SHIFT: SPACED,                          # undecided; binary-operator rule
-    Site.IMPLICATION: SPACED,                    # undecided; binary-operator rule
+    # Ratified by `S-11`, and the label matters: these are **argued**, from
+    # lowRISC's "whitespace on both sides of all binary operators", not
+    # measured. 14 instances between them is not a measurement, and a value
+    # nobody chose should not go on looking like one somebody counted.
+    Site.BITWISE: SPACED,                        # argued: binary-operator rule
+    Site.SHIFT: SPACED,                          # argued: binary-operator rule
+    # ...except this one, which was defaulted and then measured, and the
+    # difference is the whole reason the two labels are kept apart.
+    Site.IMPLICATION: SPACED,                    # 6/6, across 5 files
     Site.UNARY: Spacing(0, 0),                   # after: 92/92
+
+    # `a >> b`, spaced outside and tight between -- from *two* sites, because
+    # one cannot say it. The module docstring above notes that a site cannot
+    # force tightness against a spaced neighbour, and that is true of a site;
+    # it is not true of a pair. Composed by `max(left.after, right.before)`:
+    #
+    #     a  >>  b        gap(None, OPEN)  = max(0, 1) = 1
+    #      ^^  ^^         gap(OPEN, CLOSE) = max(0, 0) = 0
+    #                     gap(CLOSE, None) = max(1, 0) = 1
+    #
+    # Same shape as TEMPLATE_ANGLE_OPEN/CLOSE, and argued rather than
+    # measured: one instance in the corpus, and the value is `SHIFT`'s read
+    # across the pair.
+    Site.SHIFT_RIGHT_OPEN: Spacing(1, 0),        # argued; see Site.SHIFT
+    Site.SHIFT_RIGHT_CLOSE: Spacing(0, 1),       # argued; see Site.SHIFT
+
+    # `p ? a : b` -- argued from the general binary-operator rule, with the
+    # Linux kernel's "binary *and ternary* operators" as the named peer. The
+    # corpus contains no ternary at all, so there is nothing here to measure
+    # and this says so rather than quoting a count from a neighbour.
+    Site.TERNARY_COND: SPACED,                   # argued; no corpus instances
+    Site.COLON_TERNARY: SPACED,                  # argued; no corpus instances
+
+    # `function void f(int... args)`. Argued from C's
+    # `printf(const char *fmt, ...)` -- tight against the type, one space
+    # before the name -- and **not** from the comma's shape, though the value
+    # is the same. `pssfmt.rules.procedural` names borrowing the comma's
+    # number as the trap this site had to avoid: a site invented from a single
+    # instance looks measured, and the corpus has exactly one varargs
+    # parameter. The number is not the claim; where it came from is.
+    Site.VARARGS: Spacing(0, 1),                 # argued; 1 corpus instance
+
+    # `x**2` tight, `base ** f(n)` spaced -- Black's rule, and the one place
+    # in this tool where a gap depends on the *shape* of the operands rather
+    # than on token adjacency. Argued: 65 corpus instances, all one author's,
+    # all tight with simple operands, so the corpus cannot distinguish this
+    # rule from "always tight" and the spaced branch has no evidence at all.
+    #
+    # Two sites rather than one operand-aware site, so the concession is
+    # contained: which of them applies comes from the tree via `sites_at`,
+    # exactly as it does for TEMPLATE_ANGLE_* against COMPARISON. Everything
+    # downstream of `pssfmt.rules.exprs._exponent_sites` is ordinary.
+    Site.EXPONENT: TIGHT,                        # argued; 65/65 with simple operands
+    Site.EXPONENT_WIDE: SPACED,                  # argued; 0 corpus instances
 
     # `foo(a, b)` -- tight against the callee, tight inside.
     Site.CALL_PAREN_OPEN: Spacing(0, 0),         # 241/244, 765/767
@@ -388,11 +507,34 @@ DEFAULT_SPACING: Mapping[Site, Spacing] = MappingProxyType({
     # same shape as `MULTIPLICATIVE`'s split and decided the same way.
     Site.BRACE_OPEN: Spacing(1, 1),              # before: 725/732; after: 7/10
     Site.BRACE_CLOSE: Spacing(1, 0),             # before: 7/10
+    # `unique {a, b};` and `{1, 2, 3}` -- tight inside. Argued (`S-12`): one
+    # `unique` and two aggregate literals, in three files, which is not a
+    # measurement. The reason it is not simply BRACE_OPEN's 7/10 is that that
+    # number was measured on **declaration bodies**, and a list is not one:
+    # every list-like construct already measured in PSS is tight inside --
+    # `f(a, b)` 765/767, `packed_s<T, 32>` 137/137, `[1..4096]` 18/18 -- so
+    # borrowing the body's answer here would make a list the one exception.
+    Site.LIST_BRACE_OPEN: Spacing(1, 0),         # argued; 3 corpus instances
+    Site.LIST_BRACE_CLOSE: Spacing(0, 0),        # argued; 3 corpus instances
+    # `} else {` -- cuddled. Argued (`S-1`): 5 if/else in 3 files is not a
+    # measurement, and the corpus is not unanimous. Every comparable guide
+    # is: K&R, the Linux kernel ("put the closing brace last, followed by
+    # `else`"), Google C++, and lowRISC all write `} else {`. Allman does not
+    # occur anywhere in this corpus, so the shape it would need is not one
+    # any voice here is asking for.
+    Site.BLOCK_TAIL: SPACED,                     # argued; 5 corpus instances
 
     Site.COLON_BIT_SLICE: TIGHT,                 # by guide: lowRISC, Verible
     Site.COLON_CASE_ITEM: Spacing(0, 1),         # 214/224
     Site.COLON_INHERITANCE: SPACED,              # 355/358
     Site.COLON_LABEL: SPACED,                    # by preference; humans over generator
+    # `foreach (i : list)`, `repeat (i : 4)`. Argued (`S-5`): one instance in
+    # the corpus, and it is the *colon-less* `foreach (chans[i])` spelling, so
+    # there is nothing here to measure at all. Spaced because that is what the
+    # construct is -- C++'s range-`for` writes `for (auto x : xs)`, the
+    # inheritance colon beside it is 355/358 spaced, and lowRISC asks for a
+    # space either side of a colon that labels rather than delimits.
+    Site.COLON_ITERATOR: SPACED,                 # argued; 0 corpus instances
 })
 
 
@@ -429,6 +571,42 @@ class Style:
     optional_semicolon: SemicolonMode = SemicolonMode.OMIT
     alignment: AlignMode = AlignMode.INFER
     alignment_group_boundary: GroupBoundary = GroupBoundary.BLANK_LINES
+    #: How a list that does not fit distributes its items (``S-16a``).
+    #:
+    #: ``never`` -- all or nothing. The corpus cannot decide this: it contains
+    #: no wrapped argument list that a rule reaches, because every construct
+    #: holding one was declined until this item. So it is argued, and the
+    #: argument is about diffs rather than about density -- an all-or-nothing
+    #: list changes one line when one argument changes, and a packed list can
+    #: reflow every line after it. `prettier`, `rustfmt` and `black` all
+    #: chose this way; `clang-format`'s LLVM style did not, which is why the
+    #: other answer is an option and not an opinion.
+    pack_arguments: PackMode = PackMode.NEVER
+    #: Where a broken list's items line up (``S-16b``).
+    #:
+    #: ``False`` indents them by ``continuation_indent`` from the line that
+    #: opened the list. ``True`` aligns them under the character after the
+    #: open bracket, which is clang-format's ``AlignAfterOpenBracket: Align``.
+    #:
+    #: Argued the same way and for the same reason: continuation indent
+    #: survives a rename of the callee, and open-paren alignment re-indents
+    #: every continuation line when the name before the bracket changes width.
+    align_after_open_bracket: bool = False
+    #: Columns before a trailing ``// comment`` (``S-18``).
+    #:
+    #: A **floor**, not a replacement, and the distinction is the whole of the
+    #: option's design. ``decls._trailing`` carries the *author's* gap through
+    #: to the alignment pass, because by then the source is gone and that gap
+    #: is the only evidence a block was a deliberate table. This raises the
+    #: floor under it; it never overwrites a wider one. Overwriting would make
+    #: ``infer`` unable to infer, and every hand-built comment column would
+    #: collapse while looking considered.
+    #:
+    #: Default 1, which is the status quo and what the corpus writes for a
+    #: comment that is not part of a column. Exposed because two spaces is a
+    #: house style with real backing -- Google's C++ guide asks for it -- and
+    #: nothing about it is derivable from PSS.
+    spaces_before_trailing_comment: int = 1
 
     # -- Per-construct overrides. Empty in v1; the seam is the accessor, not
     #    the table, so a rule written today needs no change when one fills up.
@@ -453,6 +631,13 @@ class Style:
         if self.max_blank_lines < 0:
             raise ValueError(
                 f"max_blank_lines cannot be negative, got {self.max_blank_lines}"
+            )
+        if self.spaces_before_trailing_comment < 1:
+            # One, not zero: `int x;// why` is legal and unreadable, and a
+            # floor of zero would make the option able to produce it.
+            raise ValueError(
+                "spaces_before_trailing_comment must be at least 1, got "
+                f"{self.spaces_before_trailing_comment}"
             )
         for name in (
             "indent_overrides", "continuation_overrides", "brace_overrides",
@@ -486,8 +671,28 @@ class Style:
         return self.boundary_overrides.get(construct, self.alignment_group_boundary)
 
     def break_policy_for(self, construct: Construct) -> BreakMode:
-        """How ``construct`` relates to line breaking."""
-        return self.break_overrides.get(construct, BreakMode.FIT)
+        """How ``construct`` relates to line breaking.
+
+        The global default follows ``pack_arguments``: ``never`` is a
+        ``Group`` (``FIT``) and ``bin_pack`` is a ``Fill``. Per-construct
+        overrides still win.
+
+        :data:`_FILLED` is the one construct that does not follow it, and it
+        is not an exception invented here -- :class:`BreakMode` has said
+        ``RANGE_LIST`` wants ``FILL`` since ``P3-5``, and ``formatter.md``
+        section 3.2 argued for it before that. ``S-16a`` decided how an
+        *argument* list distributes, which is a question about a list of
+        expressions; a range list is a list of numbers, and one number per
+        line turns ``in [0..7, 16, 32..63]`` written across 64 constants into
+        64 lines.
+        """
+        if construct in _FILLED:
+            default = BreakMode.FILL
+        else:
+            default = (BreakMode.FILL
+                       if self.pack_arguments is PackMode.BIN_PACK
+                       else BreakMode.FIT)
+        return self.break_overrides.get(construct, default)
 
     def optional_semicolon_for(self, construct: Construct) -> SemicolonMode:
         """What to do with a ``;`` this body does not require."""
@@ -550,6 +755,10 @@ class Style:
         """A copy with ``changes`` applied. The only way to vary a Style."""
         return replace(self, **changes)
 
+
+#: Constructs whose break policy is ``FILL`` regardless of ``pack_arguments``.
+#: See :meth:`Style.break_policy_for`.
+_FILLED = frozenset({Construct.RANGE_LIST})
 
 #: The canonical style: what ``pssfmt`` produces with no configuration.
 DEFAULT_STYLE = Style()

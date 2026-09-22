@@ -64,8 +64,8 @@ from .emit import (
     span_tokens,
     verbatim_layout,
 )
-from .exprs import sites_for
-from .tokens import WORD, emit_span, floor_gap
+from .exprs import sites_for, wrap_for
+from .tokens import WORD, emit_span, flat_width, floor_gap
 
 #: ``struct_kind`` covers five spellings that lay out the same way but are
 #: separate members of :class:`~pssfmt.style.Construct`, so a house style can
@@ -233,6 +233,25 @@ _HEADER_VOCABULARY = {
     "TOK_LT": WORD,
     "TOK_GT": WORD,
     "TOK_COMMA": Site.COMMA,
+    # ``struct base_s <struct TRAIT : addr_trait_s = empty_addr_trait_s>`` --
+    # the *declaring* side (``S-7``), and the last construct that could
+    # decline a header. 16 instances in 5 files.
+    #
+    # ``TOK_TYPE`` and the type categories are word-class keywords with no
+    # second reading. ``=`` is ``Site.ASSIGN``, measured at 271/319 over the
+    # construct a default value is.
+    #
+    # **The closure argument the colon rests on survives this, and it is worth
+    # checking rather than assuming.** A parameter carries a ``:`` that is a
+    # *bound* rather than inheritance -- ``docs/style.rst`` named that as the
+    # reason this construct was left alone. It is not a sixth reading: what
+    # follows a bound colon is the type the parameter is bounded by, which is
+    # exactly what an inheritance colon separates. Same site, same measured
+    # value, and the vocabulary entry above stays unconditional.
+    "TOK_TYPE": WORD,
+    "TOK_MONITOR": WORD,
+    "TOK_NUMERIC": WORD,
+    "TOK_SINGLE_EQ": Site.ASSIGN,
     # What a template argument can be, besides a name: a literal or a scalar
     # type. Both word-class, neither with a second reading. Measured inside
     # the corpus's 137 argument lists, the whole inventory is ID (172), ``,``
@@ -1278,9 +1297,18 @@ def sites_before(ctx: Any, node: Any, last: int) -> Any:
     return sites
 
 
+def _spans_lines(ctx: Any, first: int, last: int) -> bool:
+    """Whether the author wrote code positions *first*..*last* across lines."""
+    code = ctx.trivia.code_indices
+    if first > last or last >= len(code):
+        return False
+    return (ctx.trivia.of(code[first]).token.line
+            != ctx.trivia.of(code[last]).token.line)
+
+
 def _header(ctx: Any, node: Any, open_child: Any,
             vocabulary: Any = None, sites: Any = None,
-            separate: Any = None) -> Layout:
+            separate: Any = None, wrap: Any = None) -> Layout:
     """Everything up to and including ``{``.
 
     Written out token by token when the header uses *vocabulary*, so that
@@ -1314,6 +1342,11 @@ def _header(ctx: Any, node: Any, open_child: Any,
     prototype this module must not touch still has a body it should lay out,
     so declining the header cannot mean declining the construct.
 
+    *wrap* is a bracketed list in the header that may break across lines
+    (``S-16``), passed straight through. A function's parameter list is the
+    consumer: before it existed, a prototype the author wrapped had to be
+    reproduced, because joining was the only thing this could do to it.
+
     *separate* is the caller's extra floor, passed straight to
     :func:`~pssfmt.rules.tokens.emit_span`. No declaration header needs one --
     a header ends at ``{``, whose ``before`` is 1 -- and a *prototype* header
@@ -1332,13 +1365,36 @@ def _header(ctx: Any, node: Any, open_child: Any,
     if vocabulary is None:
         vocabulary = _HEADER_VOCABULARY
         sites = sites_before(ctx, node, brace_pos)
+        # `S-16`/`S-7`: a template *parameter* list may break. Bounded by the
+        # brace, so a list inside the body is not offered as this header's.
+        wrap = wrap_for(ctx, node, limit=brace_pos)
 
     emitted = None if sites is None else emit_span(
-        ctx, first, brace_pos, vocabulary, separate=separate, sites_at=sites)
+        ctx, first, brace_pos, vocabulary, separate=separate, sites_at=sites,
+        wrap=wrap)
+
+    origin = trivia.of(trivia.code_indices[first]).token.col
+    if emitted is not None and wrap is None \
+            and _spans_lines(ctx, first, brace_pos) \
+            and origin + flat_width(emitted) > ctx.style.print_width:
+        # `S-17`'s guard: **join only where the result can be laid out.**
+        #
+        # Joining a header the author wrapped is what this function is *for*
+        # -- `component\nc\n:\nb {}` comes back on one line, and has since
+        # `P3-2b`. What changed with `S-7` is that a header holding a template
+        # parameter list can now be joined too, and the corpus's widest joins
+        # to 108 columns with nowhere to break: `struct s<...> : base_s<T> {`
+        # is two lists, and `emit_span` takes one wrap.
+        #
+        # So the test is the width and not the wrapping. A header that joins
+        # to something that fits is joined, as before; one that does not, and
+        # that has no list to break, keeps the author's line. That is worse
+        # than a rule and better than a line the tool has decided it cannot
+        # break and emitted anyway.
+        emitted = None
     if emitted is not None:
         return emitted
 
-    origin = trivia.of(trivia.code_indices[first]).token.col
 
     brace_lead = trivia.of(open_child.token_index).raw_leading
     if not _only_whitespace(brace_lead):
@@ -1367,8 +1423,9 @@ def _header(ctx: Any, node: Any, open_child: Any,
 
 def _block(ctx: Any, node: Any, construct: Construct,
            body: Any = None, vocabulary: Any = None, sites: Any = None,
-           separate: Any = None, separator: Optional[str] = None) -> Layout:
-    """A braced declaration: header, indented members, closing brace.
+           separate: Any = None, separator: Optional[str] = None,
+           tail: Optional[Layout] = None, wrap: Any = None) -> Layout:
+    """A braced declaration: header, indented members, closing brace, tail.
 
     *body* is the node holding the braces, where that is not *node* itself.
     A constraint is the case that needs it: ``constraint_declaration`` is
@@ -1382,6 +1439,26 @@ def _block(ctx: Any, node: Any, construct: Construct,
     *vocabulary*, *sites* and *separate* are passed through to
     :func:`_header`, and only the header uses them: a body is members, and a
     member is built by its own rule or reproduced.
+
+    *tail* is emitted immediately after the closing brace, **on the same
+    line** (``S-1``). Until it existed this function could only describe a
+    construct that *ends* at its ``}``, and two in PSS do not::
+
+        } else { … }              the second half of an if/else
+        } while (expr);           the tail of a repeat-while
+
+    Both were declined for exactly that reason, and both were declined in
+    three modules rather than one -- ``constraints``, ``procedural`` and
+    ``activities`` each carry an ``if``/``else``. Growing the parameter here
+    rather than growing an ``_if_else`` helper in each is the same call this
+    function made when it grew *body* for constraints instead of letting that
+    module copy it.
+
+    A tail is a *layout*, not a node, and that is deliberate: what follows the
+    brace is a second header in one case and a whole statement in the other,
+    and this function has no business knowing which. It knows only that
+    something goes there without a line break in front of it. The caller
+    supplies the gap, from a site, for the reason ``T-13`` exists.
     """
     body = node if body is None else body
     braces = _braces(body)
@@ -1395,20 +1472,25 @@ def _block(ctx: Any, node: Any, construct: Construct,
         return _reproduce(ctx, node)
 
     header = _header(ctx, node, body.children[open_at], vocabulary, sites,
-                     separate)
-    if not members:
-        return concat([header, text("}")])
-
-    close_token = ctx.trivia.of(body.children[close_at].token_index).token
-    blanks = _blank_lines_before(ctx, close_token)
-
-    return concat([
-        header,
-        indent(_stack(ctx, members, lead_break=True),
-               ctx.style.indent_for(construct)),
-        hardline(min(blanks, ctx.style.max_blank_lines)),
-        text("}"),
-    ])
+                     separate, wrap)
+    parts: List[Layout] = [header]
+    if members:
+        # A blank line before the closing brace is **kept**, clamped like any
+        # other run. `S-4` proposed stripping it, and the blank line after
+        # the opening brace with it; both were reverted after measurement --
+        # 41 blank lines follow an opening brace in 41 of the 92 corpus
+        # files, across two independent human voices; the generator writes
+        # none. `tools/style_survey.py` reports the counts. See `docs/status.rst`
+        # on why this is deferred rather than un-started.
+        close_token = ctx.trivia.of(body.children[close_at].token_index).token
+        blanks = _blank_lines_before(ctx, close_token)
+        parts.append(indent(_stack(ctx, members, lead_break=True),
+                            ctx.style.indent_for(construct)))
+        parts.append(hardline(min(blanks, ctx.style.max_blank_lines)))
+    parts.append(text("}"))
+    if tail is not None:
+        parts.append(tail)
+    return concat(parts)
 
 
 #: ``enum spi_mode_e : bit[2] { SPI_MODE_0 = 0, … }`` (``P3-12``).

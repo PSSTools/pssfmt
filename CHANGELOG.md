@@ -8,7 +8,76 @@ never upgrade again.
 
 ## Unreleased
 
+### Changed — the style now decides twenty things it used to leave alone
+
+**Read this before upgrading a formatted codebase.** Every item below was a
+construct `pssfmt` previously reproduced exactly because the test corpus could
+not decide how to lay it out. They are decided now, which means the first run
+after this upgrade reformats code the previous version left alone. On the
+project's own corpus that is 31 files before and 56 after, of 92.
+
+Per the note at the top of this file, that makes this a **breaking change**.
+
+- **`} else {`** — cuddled, and `} else if (…) {` for a chain, which stays
+  flat rather than indenting a level per branch. Decided by argument rather
+  than by measurement: five instances in three files cannot settle it, and
+  K&R, the Linux kernel, Google C++ and lowRISC all agree. A branch that is
+  **not braced** (`if (x) y;`) is still reproduced — adding the braces that
+  would settle it changes your tokens.
+- **Loops are laid out.** `foreach (i : list)`, `repeat (i : 4)`,
+  `repeat (4)`, `while (x)`, and the same two answers in constraints and
+  activities. The iterator colon is spaced. `repeat { … } while (e);` is
+  still left alone.
+- **Long lists break.** A call's arguments, a function's parameters, a
+  template's parameters and a range list now break when they do not fit —
+  all or nothing by default, one item per line. Wrapped prototypes, wrapped
+  statements and wrapped template parameter declarations are **joined and
+  re-broken from their content**, so where you broke a line no longer decides
+  where it breaks. Measured over the corpus, lines past `print_width` go from
+  123 to 51.
+
+  *The cost, stated plainly:* a hand-aligned parameter table is joined and
+  re-broken like anything else, and loses its columns. Three of the corpus's
+  five are. `// pssfmt off` is what keeps one.
+
+- **Spacing decided for seven more constructs.** `a >> b` (spaced outside,
+  tight between the two `>`), the ternary `p ? 1 : 2`, `int... args`,
+  `unique {a, b}` and `{1, 2, 3}` (tight inside — a list brace is not a body
+  brace), activity labels `a : do step;`, and template parameter declarations
+  `struct s<type T, int N = 4>`.
+- **`x**2` but `base ** f(n)`.** Tight when both operands are simple — a
+  name, a dotted or scoped path, or a number — and spaced otherwise. Black's
+  rule, and the one place in the tool where a gap depends on the *shape* of
+  an expression rather than on which two tokens are adjacent. No corpus file
+  changes: all 65 instances are already tight.
+- **Bitwise, shift and implication spacing is now stated rather than
+  inherited**, and labelled *argued* rather than measured. No behaviour
+  change; `docs/style.rst` had been carrying values nobody had chosen in a
+  table of values somebody had counted.
+
+Two things were decided **not** to change, and both are recorded with the
+measurement rather than left as absences:
+
+- **Blank lines against a brace are kept.** Stripping them was implemented and
+  reverted: two independent human voices write a blank line after `{` in 41 of
+  the corpus's 92 files and the code generator writes none — against `gofmt`,
+  `rustfmt` and `black`, which all strip them. `tools/style_survey.py` reports
+  the count.
+- **`infer` still judges a run of lines as a whole** rather than each column
+  separately. Measured before being built: it changes none of the 92 files,
+  because the case it would rescue is one that run-splitting already handles.
+
 ### Added
+
+- **Three configuration keys**, taking the set from twelve to fifteen:
+
+  - `spaces_before_trailing_comment` (default `1`) — the **minimum** columns
+    before a trailing `// comment`. A floor, not a target: a comment column
+    you built by hand is wider and stays exactly where you put it.
+  - `pack_arguments` (default `"never"`) — `"bin_pack"` gives LLVM's shape,
+    greedy packing rather than one item per line.
+  - `align_after_open_bracket` (default `false`) — line a broken list's items
+    up under the open bracket instead of indenting them.
 
 - **UTF-16 and UTF-32 files are read, and written back in the encoding they
   came in.** Windows PowerShell 5.1 — the shell that ships in the box —

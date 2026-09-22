@@ -57,11 +57,42 @@ FILES = corpus_files()
 #: written on one line, or a member the author indented to a column that is
 #: not the body's. All three are decided by ``docs/style.rst``.
 REFORMATTED = {
+    # ``S-3``. The corpus's one *inline* anonymous activity sequence block --
+    # `{ copy; chk; }` inside a `parallel` -- opens out; the other seven are
+    # already open. It used to decline, on the grounds that a headerless block
+    # emits a line containing only `{` and `docs/style.rst` measures braces as
+    # attached. `S-3` decided that the brace rule is about a brace and *its
+    # header*, and that this construct has none -- so it is the one documented
+    # exception rather than a violation, and `lone_brace_offenders` now knows
+    # the difference.
+    #
+    # The visible diff is three lines. What it actually buys is the two
+    # traversals inside, which were unreachable behind the decline.
+    "example2/concurrent_dma_a.pss",
     "example2/dma_types_pkg.pss",
     "example2/mem_c.pss",
     "example2/spi_types_pkg.pss",
     "language-ref/activity_shapes.pss",
     "language-ref/behavioral_coverage.pss",
+    # ``S-12``, and the whole of what the list brace moves in this corpus is
+    # one line::
+    #
+    #     unique { chans };   ->   unique {chans};
+    #
+    # A `{` that delimits a **list** rather than opening a body, so it is
+    # `Site.LIST_BRACE_*` and not the `Site.BRACE_*` measured on 725
+    # declaration bodies. Three instances across the corpus is not a
+    # measurement either, so the value is argued: every list-like construct
+    # PSS *has* measured is tight inside -- `f(a, b)` 765/767,
+    # `packed_s<T, 32>` 137/137, `[1..4096]` 18/18 -- and borrowing the body's
+    # answer would make a list the sole exception.
+    #
+    # This file also holds the corpus's only `if` and `foreach` constraints,
+    # and `S-1` and `S-5` format both. Neither moves a byte: the author had
+    # already written them the way the rules produce. Worth recording, because
+    # "this file is in the list" now has two causes and only one of them is
+    # visible in the diff.
+    "language-ref/constraints.pss",
     "language-ref/coverage.pss",
     # The fourth kind, added by ``P3-5``, and the only entry here that is a
     # second-order effect rather than a direct one::
@@ -226,6 +257,80 @@ REFORMATTED = {
     #     action write_a { rand int size; } ->  action write_a {
     #                                               rand int size;
     #                                           }
+    # ``S-4`` **is not here, and that is the item's outcome.** It proposed
+    # stripping a blank line immediately after `{` and immediately before `}`.
+    # It was implemented, measured, and reverted::
+    #
+    #     blank line after `{`   41 -- 37 hand-written, 4 third-party, 0 generated
+    #     blank line before `}`    5 -- all third-party
+    #
+    # Across 41 of the 92 files, and reproducible: `tools/style_survey.py`
+    # reports both counts per voice. The first draft of this comment said
+    # 47/43, which counted `pss31/` -- the files this project authored, and
+    # the one voice `docs/style.rst` excludes from evidence as circular.
+    #
+    # The plan predicted a small radius on the grounds that the corpus could
+    # not decide this. It can: *two independent human voices* write a blank
+    # line after an opening brace, in 41 of the 92 files, and the code
+    # generator writes none. Agreement across independent authors is what this
+    # project counts as evidence -- it is the first claim `docs/style.rst`
+    # makes about its own method -- so implementing the rule would have been
+    # 33 files of diff taken against the strongest kind of evidence the corpus
+    # produces.
+    #
+    # Deferred rather than un-started; `docs/status.rst` records it beside
+    # `pool [4]` and the `select` weights. The argument for stripping them is
+    # good (`gofmt`, `rustfmt` and `black` all do, and `clang-format`'s
+    # `MaxEmptyLinesToKeep` does not apply at a block boundary) and will be
+    # made again -- which is why the numbers are here rather than only in a
+    # commit message.
+    # ``S-16`` and its two consumers, ``S-7`` and ``S-17``: 23 files, and the
+    # only entry in this set whose justification is a **number about the
+    # output** rather than a rule applied to an input.
+    #
+    #     lines over ``print_width``   input 123   ->   output 51
+    #
+    # Every other item in phase S is a spacing decision whose radius is
+    # whatever the corpus happens to contain. This one has a job, and that is
+    # the measure of whether it did it. It more than halves the corpus's
+    # over-width lines, and the 51 that remain are almost entirely hand-built
+    # trailing-comment tables -- a comment cannot be moved off its line, so
+    # nothing here can reach them.
+    #
+    # What moves, in three shapes:
+    #
+    # * **wrapped prototypes and calls join and re-break** (``S-17``). The
+    #   nine ``example2`` files are this. Three carried hand-aligned parameter
+    #   tables and lose them, which is ``S-16d``'s stated cost -- the release
+    #   note points at ``// pssfmt off``.
+    # * **generated lines past 80 are now broken** (``S-16``). The thirteen
+    #   ``peakrdl`` files are one line each, at 82 columns, that nothing could
+    #   break before.
+    # * **a template parameter declaration is formatted** (``S-7``).
+    #   ``sync_pkg.pss`` is ``int DEPTH=1`` gaining its spaces.
+    "example2/check.pss",
+    "example2/check_a.pss",
+    "example2/dma_c.pss",
+    "example2/fill.pss",
+    "example2/fill_a.pss",
+    "example2/pattern_word.pss",
+    "example2/prog_read_a.pss",
+    "example2/prog_write_a.pss",
+    "example2/pss_top.pss",
+    "peakrdl/access_matrix.pss",
+    "peakrdl/alias.pss",
+    "peakrdl/encode.pss",
+    "peakrdl/encode__enums_off.pss",
+    "peakrdl/endian.pss",
+    "peakrdl/gaps.pss",
+    "peakrdl/gaps__pad_tail.pss",
+    "peakrdl/gaps__rsvd_prefix.pss",
+    "peakrdl/keywords.pss",
+    "peakrdl/msb0.pss",
+    "peakrdl/scalar_regs.pss",
+    "peakrdl/scalar_regs__base_address.pss",
+    "peakrdl/widths.pss",
+    "stdlib/sync_pkg.pss",
     "pss31/annotations.pss",
     "pss31/behavioral_coverage.pss",
     "pss31/templates_and_activity.pss",
@@ -398,6 +503,52 @@ def test_the_output_never_indents_with_a_tab(path):
     offenders = tab_indent_offenders(out, verbatim_lines(out))
     assert not offenders, "%s: tab indentation on lines %s" % (
         ident(path), offenders[:10])
+
+
+#: Lines past ``print_width`` in the corpus, before and after formatting.
+#:
+#: The number ``S-16`` is judged by, and the only figure in this suite that is
+#: a property of the **output** rather than of an input. Every other rule in
+#: the style has a radius -- whatever the corpus happens to contain. Line
+#: breaking has a *job*, so the measure of whether it did it is whether the
+#: over-width lines went down.
+#:
+#: Pinned as an inequality with a floor rather than as an exact number,
+#: because the exact number moves whenever any rule changes a line's width and
+#: that is not a regression. What *is* a regression is the ratio getting
+#: worse, and the floor is what catches a change that quietly stops breaking.
+OVER_WIDTH_IN_THE_INPUT = 123
+OVER_WIDTH_CEILING = 55
+
+
+def test_line_breaking_reduces_the_over_width_lines():
+    """``S-16``'s reason for existing, measured over 92 real files.
+
+    The 51 or so that remain are almost entirely hand-built trailing-comment
+    tables. Nothing here can reach those: a comment cannot be moved off the
+    line it annotates, so the only way to bring one inside the width would be
+    to reflow the comment -- which ``docs/style.rst`` commits to never doing.
+
+    If this fails *low*, the ceiling wants lowering and the item got better.
+    If it fails high, something stopped breaking.
+    """
+    before = sum(len(line) > DEFAULT_STYLE.print_width
+                 for path in FILES for line in read(path).splitlines())
+    after = sum(len(line) > DEFAULT_STYLE.print_width
+                for path in FILES
+                for line in format_source(read(path)).splitlines())
+
+    assert before == OVER_WIDTH_IN_THE_INPUT, (
+        "the corpus changed; re-measure the baseline before reading the "
+        "assertion below as a regression (%d, was %d)"
+        % (before, OVER_WIDTH_IN_THE_INPUT))
+    assert after <= OVER_WIDTH_CEILING, (
+        "%d lines are past print_width after formatting, against a ceiling "
+        "of %d. Line breaking has stopped reaching something it used to."
+        % (after, OVER_WIDTH_CEILING))
+    assert after < before // 2, (
+        "formatting no longer halves the corpus's over-width lines "
+        "(%d -> %d)" % (before, after))
 
 
 @pytest.mark.parametrize("path", FILES, ids=ident)

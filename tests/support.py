@@ -206,6 +206,27 @@ def tab_indent_offenders(out: str, exempt) -> List[int]:
 
 
 def lone_brace_offenders(out: str, exempt) -> List[int]:
-    """K&R, 732 of 733. Allman does not occur in the corpus."""
-    return [i for i, line in enumerate(out.splitlines(), 1)
-            if line.strip() == "{" and i not in exempt]
+    """K&R, 732 of 733. Allman does not occur in the corpus.
+
+    ``S-3`` added the one documented exception, and it is *not* an Allman
+    brace: an anonymous activity sequence block is written ``{ … }`` with no
+    header at all, so there is nothing for its brace to attach to. The rule
+    is about a brace and *its header*, and this construct has none.
+
+    Distinguished from an Allman brace by what is on the line above, which is
+    exactly the difference: Allman moves a brace off a header that exists,
+    and this one has nothing to have moved off. A line ending in ``{``, ``}``
+    or a body-opening construct above a lone ``{`` is the anonymous block; a
+    line ending in ``)``, an identifier or a keyword is a header the brace
+    should have been attached to.
+    """
+    lines = out.splitlines()
+    offenders = []
+    for i, line in enumerate(lines, 1):
+        if line.strip() != "{" or i in exempt:
+            continue
+        above = lines[i - 2].rstrip() if i >= 2 else ""
+        if above.endswith("{") or above.endswith("}") or not above:
+            continue                     # an anonymous block: S-3's exception
+        offenders.append(i)
+    return offenders

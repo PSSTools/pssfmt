@@ -107,10 +107,13 @@ The layer boundaries
     Exposing an option is where those two modules meet the rest of the
     pipeline, and it carries an obligation worth stating architecturally: **a
     key the configuration accepts is a promise, so the last step before
-    exposing one is finding the code that keeps it.** Two of the twelve keys
-    had no such code when the config layer was written -- one was made real,
-    one is refused -- and a test asserts of every remaining key that setting
-    it changes real formatter output. The alternative is not a missing
+    exposing one is finding the code that keeps it.** Two of the original
+    twelve keys had no such code when the config layer was written -- one was
+    made real, one is refused -- and a test asserts of every remaining key
+    that setting it changes real formatter output. The thirteenth,
+    ``spaces_before_trailing_comment``, was added under that rule rather than
+    beside it: its probe uses a *ragged* comment run, because an aligned one
+    would pass for a formatter that read the key and did nothing with it. The alternative is not a missing
     feature, it is a tool that accepts an intention and then disagrees with
     it silently, which is strictly worse than not offering the option.
 

@@ -65,7 +65,7 @@ miscounted: ``*`` is more often ``import pkg::*`` or the ``bind x *;``
 wildcard than multiplication; ``<`` and ``>`` are far more often
 type-parameter brackets than comparisons, and cannot be told apart by name
 shape because PSS generics are lowercase (``reg_c``, ``packed_s``); and ``:``
-serves four unrelated constructs with four different conventions. Each of
+serves five unrelated constructs with five different conventions. Each of
 these produced a wrong answer before it produced a right one.
 
 Layout
@@ -90,6 +90,9 @@ Layout
    * - **K&R braces**
      - 732 / 733
      - ``{`` on the line that opens the construct. Allman does not occur.
+   * - **Cuddled** ``} else {``
+     - *argued*
+     - Also ``} else if (…) {``. See below: the corpus cannot decide this.
    * - **One space before** ``{``
      - 725 / 732
      - ``component c {``
@@ -124,6 +127,45 @@ for the two human voices::
 
 That is not a distribution, it is a wall: authors are wrapping *to* 80.
 ``print_width`` defaults to **80**.
+
+Where ``else`` goes
+~~~~~~~~~~~~~~~~~~~
+
+``} else {``, on one line, and ``} else if (…) {`` for a chain.
+
+This is the one **layout** rule on this page the corpus does not decide. There
+are five ``if``/``else`` statements in three files and they do not agree, and
+five instances would not be a measurement even if they did. So it is argued,
+and the agreement among comparable guides is unusually complete: K&R, the
+`Linux kernel style guide
+<https://www.kernel.org/doc/html/latest/process/coding-style.html>`_ (*"put
+the closing brace last, followed by ``else``"*), Google's C++ style, and
+lowRISC all write it this way, and Allman appears nowhere in this corpus.
+
+.. code-block:: pss
+
+   if (n > 0) {
+       sum += n;
+   } else if (n < 0) {
+       sum -= n;
+   } else {
+       sum = 0;
+   }
+
+Two consequences of that shape are decisions in their own right:
+
+**A chain is flat.** ``else if`` is not a construct in PSS -- it is an
+``else`` whose statement is another ``if`` -- so the natural reading would
+indent each branch one level deeper than the last. It does not; a chain of
+five stays at one indent level, as the example above shows for three.
+
+**A branch that is not braced is left exactly as written.** ``if (x) y;`` is
+legal PSS, and formatting it would mean deciding a second question this page
+has not answered: whether the statement goes on the ``if``'s line or on its
+own, indented. ``pssfmt`` will not add the braces that would settle it --
+that changes the token stream, which is the one thing it does not do -- so the
+whole statement is reproduced. The corpus contains two, and both hide a
+``break`` or a ``continue`` that consequently stays unformatted.
 
 The optional semicolon: omitted
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -204,6 +246,10 @@ Tight -- no space
    * - Range ``..``
      - 18 / 18
      - ``[0..7, 16, 32..63]``
+   * - Type before ``...``
+     - *argued*
+     - ``int... args`` -- and one space after it. One corpus instance; the
+       rule follows C's ``printf(const char *fmt, ...)``.
 
 Spaced -- exactly one space
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -233,6 +279,32 @@ Spaced -- exactly one space
    * - Around ``&&`` ``||``
      - 14 / 14
      - Thin, but uncontradicted.
+   * - Around ``->``
+     - 6 / 6
+     - ``a -> b`` -- implication. Five independent files.
+   * - Around ``&`` ``|`` ``^``
+     - *argued*
+     - Bitwise. See the note below: this one is not a measurement.
+   * - Around ``<<`` ``>>``
+     - *argued*
+     - Shifts. Likewise.
+
+.. note::
+
+   **Two rows in that table are arguments, not counts, and they are labelled
+   so.** Bitwise and shift operators total 14 instances across the whole
+   corpus, which is too few to decide anything. They are spaced because
+   lowRISC's rule is *"include whitespace on both sides of all binary
+   operators"* with no exception, and because every operator here that the
+   corpus *can* decide came back spaced -- so the general rule is the one the
+   evidence supports, and these are the cases where the general rule is all
+   there is.
+
+   Implication ``->`` used to sit in this same position and no longer does:
+   measured on its own it is **6 / 6 across 5 independent files**, which is a
+   count. It is stated separately because *"we defaulted it"* and *"we
+   measured it"* are different claims about the same number, and a page that
+   blurs them cannot be argued with.
 
 .. note::
 
@@ -284,8 +356,8 @@ one. A house style that spaces a call's arguments has said nothing about
 whether ``(a + b)`` should become ``( a + b )``, and one setting answering
 both questions would be a coincidence hardened into an interface.
 
-**Colons: a fifth construct.** ``docs/style.rst`` names four readings of
-``:`` and an ``enum``'s base type is a fifth -- ``enum spi_mode_e : bit[2]``.
+**Colons: another construct.** The colon table below names five readings of
+``:`` and an ``enum``'s base type is one more -- ``enum spi_mode_e : bit[2]``.
 It takes the inheritance rule, spaced, because that is what it is: the type
 the enum is based on. 4 of 4 in the corpus agree, against a rule measured at
 355 of 358.
@@ -355,6 +427,38 @@ dissenters are worth naming rather than rounding away: they are two files
 writing ``in[1..4]`` against eleven writing ``in [1..4]``. Range operators
 inside the brackets are tight either way -- ``1..4096``, 18 / 18.
 
+That margin was re-examined rather than inherited, and the rule is kept.
+Eleven files against two is a wider spread of *voices* than the raw 14 / 16
+suggests, and it is the same shape as every other split this page has decided;
+the alternative was to demote the weakest measurement on the page to an
+argument, which would have lost the two dissenters along with the count.
+
+Braces: a body and a list are different constructs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``{`` opens a declaration body 733 times in the corpus and delimits a *list*
+three times, and those are two rules::
+
+   enum op_mode_e { FAST, SLOW }      // a body -- one space inside, 7 / 10
+   unique {chans, addrs};             // a list -- tight inside
+   int bounds[2] = {1, 2};            // also a list
+
+The body rule is measured. The list rule is **argued**, and the argument is
+what makes it a rule rather than a preference: three instances in three files
+decide nothing on their own, but every list-like construct PSS *has* measured
+is tight inside -- ``f(a, b)`` at 765 / 767, ``packed_s<T, 32>`` at
+137 / 137, ``[1..4096]`` at 18 / 18. Borrowing the body's answer would make
+a list the single exception among them.
+
+This is the same argument the set bracket and the angle bracket make below and
+above: one character, two constructs, and which one applies comes from the
+parse tree. A style can move either without moving the other.
+
+Two aggregate literals are still left alone: a **map** literal
+(``{"a": 1}``) and a **struct** literal (``{.x = 1}``). Each needs a decision
+this page has not made -- another reading of ``:`` for the first, a
+``.name =`` seam for the second -- and the corpus contains neither.
+
 Angle brackets: one character, two opposite rules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -388,15 +492,22 @@ The type meets its own argument list tightly too, 135 / 137 -- two instances
 in one file write ``foo <T>``. Arguments are separated the way arguments are
 separated everywhere, one space after the comma, 122 / 127.
 
-**Template parameter *declarations* are a different construct**, and this page
-does not decide them. ``struct base_s <struct TRAIT : addr_trait_s =
-empty_addr_trait_s>`` is 16 instances in 5 files, and they do not agree: 7 of
+**Template parameter *declarations* are a different construct**, and this
+page used to leave them alone. ``struct base_s <struct TRAIT : addr_trait_s =
+empty_addr_trait_s>`` is 16 instances in 5 files and they do not agree: 7 of
 16 are tight after the ``<``, because 5 of the rest put the parameter on a
-line of its own. A parameter also carries a ``:`` that is a *bound* rather
-than inheritance, which the next section would have to grow a fifth rule for.
-``pssfmt`` leaves them exactly as written.
+line of its own.
 
-Colons: four constructs, four rules
+That turned out to be two questions wearing one coat. The disagreement is
+about **line breaking**, not about the angle brackets -- the only instances
+that can hold an opinion about the brackets hold the same one -- so the
+breaking half went to the rule above and the spacing half is decided here,
+and it needed no new site at all. The angles take the argument list's rule,
+the default ``=`` takes ``Site.ASSIGN``, and the ``:`` that is a *bound*
+takes the inheritance rule, because that is what it is: the type the
+parameter is bounded by.
+
+Colons: five constructs, five rules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Reported as a single figure, ``:`` looks like a 60/40 disagreement. Separated
@@ -404,6 +515,9 @@ by construct, each is internally consistent -- and the split matches the
 distinctions the `lowRISC Verilog style guide
 <https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md>`_
 draws independently.
+
+(The ternary's ``:`` is a sixth ``:`` and deliberately not a sixth *row*: it
+is half of an operator rather than a construct named by a colon. See above.)
 
 .. list-table::
    :header-rows: 1
@@ -425,10 +539,14 @@ draws independently.
      - one space both sides
      - 355 / 358
      - ``struct dma_csr_s : packed_s<> {``
-   * - Label, ``foreach``
+   * - Label
      - one space both sides
      - 36 human / 84 generated
-     - ``begin : foo``, ``repeat (i : n)``
+     - ``a : do step;``
+   * - Iterator
+     - one space both sides
+     - *argued*
+     - ``foreach (i : list)``, ``repeat (i : 4)``
 
 .. note::
 
@@ -445,14 +563,21 @@ draws independently.
    decision was made in favour of the humans, and lowRISC agrees: *"When
    labeling code blocks, add one space before and after the colon."*
 
-   Because it is a preference rather than a measurement, **it is not
-   applied**: an activity label (``a: do step;``) and a ``repeat (i : 4)``
-   iterator are reproduced as written. All eight activity labels in the corpus
-   are in a single file, and there is exactly one iterator colon -- one voice
-   and one instance respectively, which is how much evidence would be needed
-   to promote a preference into a rule the formatter acts on. The row stays on
-   this page because the *default* is decided; what is missing is the standing
-   to use it.
+   This page used to add that the rule was **not applied**, on the grounds
+   that a preference is not a measurement and all of the corpus's activity
+   labels are in one file. That was a decision about *standing* rather than
+   about the rule, and it has been taken the other way: ``pssfmt`` writes
+   ``a : do step;``. The visible cost is that one voice being overruled, in
+   one file.
+
+   *Iterator* is argued outright, and it is the only rule in this table with
+   nothing behind it at all. The corpus's single ``foreach`` is the
+   colon-*less* ``foreach (chans[i])`` spelling, so the number of iterator
+   colons measured is zero. It is spaced because of what the construct is:
+   C++'s range-``for`` writes ``for (auto x : xs)``, the inheritance colon in
+   the row above is 355 of 358 spaced, and lowRISC's rule is about a colon
+   that labels rather than one that delimits -- which is what an iterator's
+   is.
 
 Two questions the corpus argued about
 -------------------------------------
@@ -525,6 +650,60 @@ visually distinct:
 Most languages get this separation from their grammar. PSS does not, so here
 the spacing rule carries disambiguating information rather than merely taste.
 
+Breaking a list that does not fit
+---------------------------------
+
+A bracketed list -- a call's arguments, a function's parameters, a template's
+parameters, a range -- breaks **all or nothing**::
+
+    write32(
+        make_handle_from_handle(base, i * 4),
+        pattern_word(pattern, seed, i)
+    );
+
+Not the packed form, which fits more per line::
+
+    write32(make_handle_from_handle(base, i * 4),
+            pattern_word(pattern, seed, i));
+
+The corpus cannot decide this, and for an unusually clean reason: it contains
+no wrapped argument list that a *rule* reached, because every construct
+holding one was declined until the policy existed. So it is argued, and the
+argument is about **diffs** rather than about density. An all-or-nothing list
+changes one line when one argument changes; a packed list can reflow every
+line after the one that moved. ``prettier``, ``rustfmt`` and ``black`` all
+chose this way and ``clang-format``'s LLVM style did not, which is why the
+other answer is an option (``pack_arguments = "bin_pack"``) rather than an
+opinion.
+
+Continuation lines are indented by ``continuation_indent`` rather than aligned
+under the open bracket, for the same kind of reason: an indent survives a
+rename of the callee, and open-bracket alignment re-indents every continuation
+line when the name in front of the bracket changes width.
+``align_after_open_bracket`` is the other answer.
+
+**A range list always packs**, whatever ``pack_arguments`` says. One number
+per line turns ``in [0..7, 16, 32..63]`` written across sixty-four constants
+into sixty-four lines, and a list of numbers is not a list of expressions.
+
+Three consequences worth knowing before you meet them:
+
+* **A list that fits does not move.** The policy applies to lists that do not
+  fit, and a list that does is byte-identical to what it was before there was
+  a policy at all.
+* **A trailing comma is never added.** The broken form is not a different
+  token stream from the flat one.
+* **Where you broke a line is not where it breaks.** A call written across
+  four lines and the same call written on one produce the same output; the
+  result is a function of the content and the width. The cost is
+  hand-aligned parameter tables, which are joined and re-broken like anything
+  else -- ``// pssfmt off`` is what keeps one.
+
+The last of those has one exception, and it is a refusal rather than a rule:
+a construct the author wrapped, holding **no** list this can break, whose
+joined form would be past the width, keeps the line the author gave it.
+Emitting it joined would mean deciding by width and then violating it.
+
 Alignment: ``infer``
 --------------------
 
@@ -578,12 +757,30 @@ complete tables). A ``function`` prototype's name column is deliberately
 **not** on that list: the corpus pads it once, in one file, against 149 that
 do not, and one voice does not make a column.
 
-One consequence is worth knowing before you meet it. ``infer`` asks whether
-*every* marked column in a block lines up, so a line that carries a stop it
-cannot satisfy loses the columns it could -- two assignments that align their
-trailing comments but not their ``=`` come out flush. Judging each column
-independently is a change to this mode rather than to a rule, and it has not
-been made.
+That omission was re-examined too, and it is a rule rather than a preference
+for a reason visible only in the pairing: the ``=`` of a run of assignments
+*is* on the list, at 22 padded of 93 across 8 files. The same page, the same
+mode and the same question, answered opposite ways by the evidence -- which is
+what makes 149 : 1 a measurement and not a taste.
+
+One consequence used to be worth knowing before you met it, and is not any
+more. ``infer`` asks whether *every* marked column in a run lines up, so a
+line carrying a stop it cannot satisfy would lose the columns it could --
+two assignments that align their trailing comments but not their ``=`` coming
+out flush. Judging each column independently is a change to this mode rather
+than to a rule, and it was measured before being built.
+
+**It moves nothing.** Over the corpus's 365 alignment runs, 67 have every
+column aligned and 295 have none; the mixed case that per-column judging
+exists for occurs **three times**, and in all three it produces output
+identical to today's. Not one of the 92 files differs.
+
+The reason is that the work was already done one item earlier, in a different
+place. ``infer`` splits a group into *runs* of lines that reach the same first
+column, and lines that agree on their first column overwhelmingly agree on the
+rest -- so the mixed block this would rescue is precisely the block that run
+splitting has already separated. A mode worth one file is not a mode, and this
+one is worth none.
 
 Alignment runs *after* line breaking and can never affect a fit decision, and
 it is abandoned for a block that would push past ``print_width``.
@@ -722,6 +919,22 @@ declaration order interacts with inheritance and with ``extend`` -- and a
 formatter that sorts is a formatter that changes behaviour. It is also the
 single most common reason a team disables a formatter after adopting it.
 
+**It will not collapse a body onto one line.** A ``constraint`` block holding
+one item, a function whose body is a single call, an ``activity`` with one
+traversal, a branch of an ``if`` -- each is opened out and stays open, however
+easily it would fit. This is a commitment rather than a default because the
+corpus is emphatic and the diff would not be: 31 of its 32 named constraint
+blocks are written open, 21 of those holding exactly one item, and 117 of its
+118 function bodies likewise. Collapsing them would rewrite a deliberate
+convention across the smallest and most numerous constructs in a file.
+
+The one construct that *is* written on one line is ``enum``, and it is not an
+exception to this rule -- it is a different rule. What decides an enum's shape
+is whether its items carry values, not whether the body is short:
+``enum op_mode_e { FAST, SLOW }`` is a list and stays flat, while an enum of
+assignments is a table and is broken even when it would fit. Width does not
+enter into either decision.
+
 **It will not reflow comment text.** Comments are moved as blocks and
 re-indented, but their interiors are preserved character for character. A
 comment can contain a table, an ASCII diagram, a licence header, or a URL
@@ -764,28 +977,87 @@ Stated so that silence is not mistaken for consensus. The corpus has too few
 instances to decide these, and they are settled by the general rules above
 rather than by evidence:
 
-* Bitwise ``&`` ``|`` ``^`` and shifts ``<<`` ``>>`` -- 14 instances total.
-  Treated as binary operators, hence spaced.
+* Guarded and weighted ``select`` branches -- one instance, carrying four
+  undecided questions at once. Deferred explicitly; see :doc:`status`.
 
-  Implication ``->`` used to be in this bullet and has been measured out of
-  it: on its own it is **6 / 6 spaced across 5 independent files**, which
-  agrees with the general rule it was being defaulted to. Stated separately
-  because "we defaulted it" and "we measured it" are different claims.
+Three operators used to be in that list
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  ``>>`` is a special case, and not for a reason about style: PSS has no
-  ``>>`` token, and the shift operator is two ``>`` that must be written
-  touching while the operator as a whole is spaced. That is not something a
-  per-token rule can express, so ``pssfmt`` leaves a right shift exactly as
-  you wrote it. One instance in the corpus.
-* Exponentiation ``**`` -- 65 instances, but all from a **single author**,
-  who writes ``a**2`` without spaces. Agreement within one voice is one
-  opinion counted 65 times, so it decides nothing; and the binary-operator
-  rule above would overrule the only evidence there is. ``pssfmt`` therefore
-  formats neither way and leaves ``**`` expressions alone.
-* The ternary ``? :`` -- not present.
-* Line-breaking policy for long constraint and activity bodies. That is
-  the style-rule layer's work, and the layout engine derives it from
-  ``print_width`` rather than from a style constant.
+None of them came off it because new evidence arrived. Two changed on a
+reading of the model and one on a decision about how much complexity a single
+rule is worth -- all three worth recording separately from a measurement.
+
+**The right shift** ``a >> b``. PSS has no ``>>`` token: the operator is two
+``>`` that must be written touching, inside an operator that is spaced. This
+page used to say that a per-token rule cannot express that, and leave a right
+shift exactly as written. That is true of *one* rule and false of two --
+``pssfmt`` gives the pair two spacing sites, ``(1, 0)`` and ``(0, 1)``, and
+the gap between two adjacent tokens is the maximum of the left one's *after*
+and the right one's *before*::
+
+    a  >>  b       1 outside, 0 between, 1 outside
+
+Which is the same shape the template angle brackets already used. The spacing
+itself is the shift row in the table above, and it is argued rather than
+measured: the corpus has one right shift.
+
+Two touching ``>`` are also how a nested template argument list closes --
+``packed_s<foo_s<T>>`` -- so which reading applies comes from the parse tree
+and never from the characters, exactly as it does for ``<``.
+
+**Exponentiation** ``**``, and this one is worth a section of its own because
+it costs something the rest of the page does not.
+
+``x**2``, but ``base ** f(n)``. Tight when **both operands are simple** -- a
+name, a dotted or scoped path, or a number literal -- and spaced otherwise.
+
+.. code-block:: pss
+
+   int a = base**2;              // simple operands: tight
+   int b = base ** f(n);         // a call: spaced
+   int c = x ** (a + b);         // a parenthesised expression: spaced
+   int d = a[i] ** 2;            // a subscript: spaced
+
+**This is the only rule in ``pssfmt`` that depends on the *shape* of an
+expression rather than on which two tokens are adjacent**, and the page has
+spent two sections arguing that the simpler invariant is what makes a
+formatter trustworthy. The concession is made once, for one operator, and it
+is `Black's <https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html>`_
+precedent: Black declined PEP 8's general offer of precedence tightening and
+hugged ``**`` alone, on exactly this condition.
+
+The corpus cannot decide it. All 65 instances are one author's, all have
+simple operands and all are already tight -- which means the evidence cannot
+tell this rule apart from "always tight", and says nothing whatever about the
+spaced form. So it is argued, and the accepted consequence is a **zero-line
+diff**: every ``**`` in the corpus is already what this produces.
+
+Two consequences of "simple" are worth knowing. A **unary** operand is not
+simple, so ``-a ** 2`` is spaced -- narrower than Black, which folds the
+unary in, and narrower is the reversible side. And a **chain** comes out
+asymmetric::
+
+   a**b ** c
+
+``**`` is left-associative in PSS, so that is ``(a**b) ** c``: the inner
+operands are simple and the outer left operand is not. Black produces the
+mirror image in Python, where ``**`` associates the other way. The asymmetry
+is the rule applied consistently, and it is the reader's cue to the grouping.
+
+**The ternary** ``p ? 1 : 2``. One space around both parts. The corpus
+contains no ternary at all, so this is argued outright, from the same general
+binary-operator rule as everything else on this page -- the Linux kernel
+style guide states it as *"binary and ternary operators"* in one breath, and
+that is the peer being followed.
+
+Its ``:`` is deliberately **not** a fifth row in the colon table above. The
+colon table is about constructs that are *named* by a colon; this one is half
+of an operator that happens to be spelled with one, and giving it the label
+colon's rule by resemblance would be exactly the coincidence the ``<``
+section warns about.
+
+Where a ternary breaks when it does not fit is a line-breaking question and
+is not decided here.
 
 .. seealso::
 

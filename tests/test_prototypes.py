@@ -191,23 +191,6 @@ class TestWhatDeclines:
     body that should be laid out.
     """
 
-    def test_a_wrapped_prototype_is_reproduced(self):
-        """Three of the corpus's five are hand-aligned parameter tables and
-        all five join to 90-plus columns. ``emit_span`` discards newlines, so
-        formatting one is joining one, and there is no parameter-list break
-        policy to do better -- ``Construct.PARAMETER_LIST`` exists and nothing
-        sets it."""
-        out = fmt("component c {\n"
-                  "    target function void check(\n"
-                  "        addr_handle_t  base,\n"
-                  "        bit[32]        nbytes) {\n"
-                  " int x;\n"
-                  "}\n"
-                  "}\n")
-        assert ("    target function void check(\n"
-                "        addr_handle_t  base,\n"
-                "        bit[32]        nbytes) {\n") in out
-
     def test_a_wrapped_prototype_still_gets_its_body_formatted(self):
         """The half of the decline that is not free. Reproducing the header
         by reproducing the whole construct would have undone ``P3-11`` for
@@ -219,14 +202,6 @@ class TestWhatDeclines:
                   "}\n"
                   "}\n")
         assert "\n        int x;\n    }\n" in out
-
-    def test_varargs_declines(self):
-        """One instance, one file. ``Spacing(0, 1)`` -- the comma's shape --
-        would reproduce it exactly, and that is the trap rather than the
-        answer: a site invented from a single instance reads as measured."""
-        assert "function void  varargs( int...  args ) {" in fmt(
-            "component c {\n"
-            "    function void  varargs( int...  args ) { }\n}\n")
 
     def test_a_comment_inside_a_prototype_declines(self):
         """``function void print(string fmt/*, type ... args*/);`` -- two in
@@ -243,6 +218,44 @@ class TestWhatDeclines:
                "    function void  f( string   fmt /* why */ );\n"
                "}\n")
         assert fmt(src) == src
+
+
+class TestVarargs:
+    """``T-56`` -- ``S-14``. One instance in the corpus, and it formats now.
+
+    This construct used to be in ``TestWhatDeclines`` above, and the decline
+    was argued from the *number*: ``Spacing(0, 1)`` is the comma's shape, and
+    a site invented from a single instance by borrowing an unrelated site's
+    measurement reads as measured when it is not.
+
+    ``Site.VARARGS`` is the same number with a different provenance -- C's
+    ``printf(const char *fmt, ...)``. The value was never the problem.
+    """
+
+    def test_it_is_normalised(self):
+        assert one("    function void  varargs( int...  args );") == \
+            "    function void varargs(int... args);"
+
+    def test_the_ellipsis_binds_to_the_type_and_not_the_name(self):
+        """``int... args``, not ``int ...args``. Both spellings parse."""
+        assert one("    function void f(int ...args);") == \
+            "    function void f(int... args);"
+
+    def test_it_coexists_with_ordinary_parameters(self):
+        assert one("    function void f(int a, bit[8]... rest);") == \
+            "    function void f(int a, bit[8]... rest);"
+
+    def test_the_gaps_come_from_the_style(self):
+        """The check ``T-32``'s lesson asks for: setting the site must move
+        real output, or the rule is copying text that merely looks right."""
+        assert one("    function void f(int... args);",
+                   Style(spacing_overrides={Site.VARARGS: Spacing(1, 0)})) == \
+            "    function void f(int ...args);"
+
+    def test_it_is_idempotent(self):
+        once = fmt("component c {\n"
+                   "    function void  varargs( int...  args ) { }\n}\n")
+        assert fmt(once) == once
 
 
 class TestTheStyleIsConsulted:

@@ -110,6 +110,27 @@ The options
        deletes it, ``preserve`` leaves the author's exactly where they are,
        and ``require`` writes one after every declaration that can take one.
        See :ref:`optional-semicolons` below.
+   * - ``spaces_before_trailing_comment``
+     - ``1``
+     - The **minimum** columns before a trailing ``// comment``. A floor, not
+       a target: a comment column you built by hand is wider than this and
+       stays exactly where you put it. Raising it widens the comments that
+       had no column to begin with. Google's C++ style asks for two, which is
+       why this is an option rather than a rule.
+   * - ``pack_arguments``
+     - ``"never"``
+     - How a list that does not fit distributes its items. ``never`` is all
+       or nothing -- one item per line, so a diff touching one argument
+       touches one line. ``bin_pack`` is LLVM's shape: greedy packing, fewer
+       lines, and a diff that can reflow the rest. Range lists always pack,
+       whatever this says.
+   * - ``align_after_open_bracket``
+     - ``false``
+     - Line a broken list's items up under the open bracket instead of
+       indenting them by ``continuation_indent``. clang-format's
+       ``AlignAfterOpenBracket: Align``. The default survives a rename of the
+       callee; alignment re-indents every continuation line when the name
+       before the bracket changes width.
    * - ``alignment``
      - ``"infer"``
      - ``align``, ``flush-left``, ``preserve`` or ``infer``. ``infer``

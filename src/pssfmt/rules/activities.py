@@ -96,24 +96,15 @@ is short:
     contradicting that measurement or inventing an exception for inline
     constraints on four instances. Neither is a decision four instances can
     make.
-``a: do step;``
-    Labels. Eight instances, all in **one** file -- one voice, the same
-    argument that declined ``**`` in ``P3-4``. Handled entirely by
-    ``decls._effective``: see the ``P3-6`` note in ``_PASSTHROUGH``.
-``repeat (ri : 4)``
-    A fifth colon construct, one instance. ``docs/style.rst`` names four
-    because four is what was measured. ``TOK_COLON`` is absent from
-    :data:`_BLOCK_HEADER_VOCABULARY`, so the *header* is reproduced as
-    written while the body still opens out -- the fallback ``_header`` has
-    had since ``P3-2b`` for templated headers, doing useful work here.
 ``select { (mode == FAST) [3]: do fast_step; }``
     Guarded and weighted branches: a label colon, a weight bracket that is
     not any of the four measured brackets, and hand-aligned colons. One
     instance. The ``select`` *block* still opens out; its branches decline
     individually and are reproduced.
-``if``/``else``, ``foreach``, ``match``, ``replicate``, ``atomic``,
+``foreach``, ``match``, ``replicate``, ``atomic``,
 ``activity_scheduling_constraint``
-    One instance each. Not registered, so reproduced whole.
+    One instance each. Not registered, so reproduced whole. (``if``/``else``
+    used to be on this list; ``S-1`` decided where ``} else {`` goes.)
 ``monitor_activity_*``
     34 instances and a genuinely rich set of operators -- ``concat``,
     ``eventually``, ``overlap`` -- but **all 34 are in one file**. Volume is
@@ -132,21 +123,26 @@ from __future__ import annotations
 
 from typing import Any, Optional, Tuple
 
-from ..layout import Layout
+from ..layout import Layout, Verbatim, concat, text
 from ..style import Construct, Site
 from .decls import _block, _reproduce
 from .emit import code_span
-from .exprs import EXPRESSION_VOCABULARY, sites_for
-from .tokens import WORD, emit_span
+from .exprs import (EXPRESSION_COLON, EXPRESSION_LIST_BRACE,
+                    EXPRESSION_VOCABULARY, sites_for)
+from .tokens import WORD, emit_span, floor_gap
 
 #: ``activity {``, ``parallel {``, ``schedule {``, ``select {``,
 #: ``sequence {``, ``repeat (4) {`` -- and the bare ``{`` of an anonymous
 #: sequence block, which is a header of exactly one token.
 #:
-#: Closed, and the closure does the same work here that it does in
-#: ``decls._HEADER_VOCABULARY``: ``TOK_COLON`` is absent, so ``repeat (ri :
-#: 4)`` cannot be given the inheritance colon's spacing by accident. It
-#: declines instead, and the header is reproduced.
+#: ``TOK_COLON`` is :data:`~pssfmt.rules.exprs.EXPRESSION_COLON`'s bit-slice
+#: fallback, and the **iterator** colon that ``S-5`` decided comes from the
+#: tree instead -- :data:`_REPEAT_SITES`, which classifies ``repeat``'s own
+#: direct terminals. The first version named the iterator here, and that is
+#: wrong for a header holding a cast: ``if ((bit[3:0])x) {`` would come out
+#: ``(bit[3 : 0])x``. A vocabulary is keyed by type and these two colons are
+#: the same type at different tree positions, which is the case
+#: ``sites_at`` exists for.
 #:
 #: The expression tokens are here for ``repeat``'s count. They bring the same
 #: ambiguity they bring everywhere -- ``-`` is unary or additive, ``(`` is a
@@ -161,8 +157,12 @@ _BLOCK_HEADER_VOCABULARY.update((name, WORD) for name in (
     "TOK_SELECT",
     "TOK_SEQUENCE",
     "TOK_REPEAT",
+    # `S-1`. An `if` header is this shape too: a keyword, a control paren, an
+    # expression, a brace.
+    "TOK_IF",
 ))
 _BLOCK_HEADER_VOCABULARY["TOK_LCBRACE"] = Site.BRACE_OPEN
+_BLOCK_HEADER_VOCABULARY.update(EXPRESSION_COLON)
 
 #: ``repeat``'s parens are the statement's own, not an expression's, so no
 #: rule inside :mod:`~pssfmt.rules.exprs` claims them -- and the completeness
@@ -171,8 +171,24 @@ _BLOCK_HEADER_VOCABULARY["TOK_LCBRACE"] = Site.BRACE_OPEN
 #: headers in the corpus agree with it.
 #:
 #: The same mechanism ``P3-5`` added for ``default y == 2;``.
+#: ``TOK_COLON`` is here rather than in the vocabulary because it is
+#: ``repeat``'s **own** terminal: ``extra_rules`` classifies a node's direct
+#: children, so a colon deeper in the count expression -- a cast's bit slice
+#: -- is not claimed by this and keeps the vocabulary's answer (``S-5``).
 _REPEAT_SITES = {
     "activity_repeat_stmt": {
+        "TOK_LPAREN": Site.CONTROL_PAREN_OPEN,
+        "TOK_RPAREN": Site.CONTROL_PAREN_CLOSE,
+        "TOK_COLON": Site.COLON_ITERATOR,
+    },
+}
+
+#: The same, for ``if (…)`` (``S-1``). A separate table rather than a second
+#: key in the one above, because ``extra_rules`` is keyed by rule name and
+#: each caller passes only the rule it is laying out -- sharing one table
+#: would offer every caller classifications for constructs it cannot contain.
+_IF_SITES = {
+    "activity_if_else_stmt": {
         "TOK_LPAREN": Site.CONTROL_PAREN_OPEN,
         "TOK_RPAREN": Site.CONTROL_PAREN_CLOSE,
     },
@@ -226,7 +242,7 @@ _TRAVERSAL_VOCABULARY["TOK_SEMICOLON"] = Site.SEMICOLON
 #: Built from the atoms rather than from the expression vocabulary, for the
 #: reason ``stmts._BIND_VOCABULARY`` gives: a bind statement holds names, not
 #: arithmetic, and pulling in the operators would put tokens in two roles at
-#: once for no gain. ``TOK_LCBRACE`` is absent, so ``bind a {b, c};`` declines.
+#: once for no gain. ``TOK_LCBRACE`` is ``S-12``'s list brace.
 _BIND_VOCABULARY = {
     "TOK_BIND": WORD,
     "ID": WORD,
@@ -237,6 +253,8 @@ _BIND_VOCABULARY = {
     "TOK_LSBRACE": Site.INDEX_BRACKET_OPEN,
     "TOK_RSBRACE": Site.INDEX_BRACKET_CLOSE,
     "TOK_SEMICOLON": Site.SEMICOLON,
+    "TOK_LCBRACE": Site.LIST_BRACE_OPEN,
+    "TOK_RCBRACE": Site.LIST_BRACE_CLOSE,
 }
 
 #: Rule name -> the body construct its indentation is asked for under.
@@ -253,27 +271,6 @@ _BLOCK_RULES = {
     "activity_schedule_stmt": Construct.ACTIVITY_SCHEDULE,
     "activity_select_stmt": Construct.ACTIVITY_SELECT,
 }
-
-#: A block whose header is nothing but its own ``{``.
-#:
-#: ``activity_sequence_block_stmt`` has two spellings, ``sequence { … }`` and
-#: a bare ``{ … }``, and only the first is laid out here. The bare one is
-#: declined, and the corpus is what says so -- by failing a *style* test
-#: rather than a rule test.
-#:
-#: ``docs/style.rst`` measures brace placement as attached: a ``{`` sits at
-#: the end of the line its header is on, and no corpus file puts one alone.
-#: An anonymous block has no header, so there is nothing for its brace to
-#: attach to, and laying it out emits a line containing only ``{``. That is
-#: not a rule that needs a special case; it is a construct that does not fit
-#: the shape, and the honest response is to leave it as written.
-#:
-#: Declining also leaves the one inline instance -- ``{ copy; chk; }``, a
-#: two-action sequence written compactly inside a ``parallel`` -- exactly as
-#: its author wrote it. Whether such a block collapses is undecided anyway:
-#: the corpus opens seven out and writes one inline, and a 7-to-1 split in
-#: two files is not enough to rewrite the eighth.
-_ANONYMOUS_BLOCK = "activity_sequence_block_stmt"
 
 #: The two spellings of a traversal: ``fill;`` and ``do mem_copy_a;``.
 _TRAVERSAL_RULES = (
@@ -324,20 +321,6 @@ def _bind(ctx: Any, node: Any) -> Layout:
     return _statement(ctx, node, _BIND_VOCABULARY, _bind_stops(ctx, node))
 
 
-def _has_keyword(node: Any) -> bool:
-    """Does this sequence block open with ``sequence`` rather than with ``{``?
-
-    See :data:`_ANONYMOUS_BLOCK`. Asked of the first terminal rather than by
-    searching for the keyword, because a nested block further in would
-    otherwise answer for its parent.
-    """
-    for child in node.children:
-        if child.is_rule or child.token is None:
-            continue
-        return child.token.type_name == "TOK_SEQUENCE"
-    return False
-
-
 def _repeat_body(node: Any) -> Optional[Any]:
     """The ``{ … }`` a ``repeat`` wraps.
 
@@ -374,13 +357,192 @@ def _repeat(ctx: Any, node: Any) -> Layout:
                   vocabulary=_BLOCK_HEADER_VOCABULARY, sites=sites)
 
 
+#: ``a: do step;`` -- a label, its colon, and nothing else (``S-6``).
+#:
+#: Two entries, and the set is the argument: a label is an ``identifier``
+#: followed by ``:``, so there is nothing else a span reaching from the start
+#: of this node to its colon can contain. That is a tighter closure than any
+#: other vocabulary in this module, which is why the colon can be named by
+#: type here with no tree lookup at all.
+_LABEL_VOCABULARY = {
+    "ID": WORD,
+    "ESCAPED_ID": WORD,
+    "TOK_COLON": Site.COLON_LABEL,
+}
+
+
+def _label_colon(node: Any) -> Optional[Any]:
+    """The label's own ``:``, from among the direct terminals.
+
+    By child rather than by scanning, for the reason
+    ``procedural._colon`` gives: a colon deeper in belongs to a different
+    construct, and a position scan would classify the first one it met.
+    """
+    for child in node.children:
+        if not child.is_rule and child.token is not None \
+                and child.token.type_name == "TOK_COLON":
+            return child
+    return None
+
+
+def _labelled_statement(node: Any) -> Optional[Any]:
+    """The statement a label introduces, looked through its wrapper.
+
+    ``decls._effective`` rather than ``ctx.build`` on the wrapper, for the
+    reason ``procedural._labelled`` gives: handing dispatch a passthrough node
+    reproduces it *with* the leading trivia this rule has already emitted as a
+    gap.
+    """
+    from .decls import _effective
+
+    for child in node.children:
+        if child.is_rule and child.rule_name == "labeled_activity_stmt":
+            return _effective(child)
+    return None
+
+
+def _labelled(ctx: Any, node: Any) -> Layout:
+    """``a: do step;`` and ``a: parallel { … }`` (``S-6``).
+
+    **This item decided nothing; it granted standing.** ``Site.COLON_LABEL``
+    has been ``Spacing(1, 1)`` in ``style.py`` since ``P3-0``, and
+    ``docs/style.rst`` published it, credited lowRISC for it -- *"when
+    labeling code blocks, add one space before and after the colon"* -- and
+    then spent a paragraph explaining that the formatter had no standing to
+    apply it, because both human voices space it in 36 instances while the
+    code generator does not in 84, and a preference is not a measurement. All
+    eight activity labels in the corpus are in a single file.
+
+    ``S-6`` is the decision to overrule that one voice. Worth stating plainly
+    rather than as a rule landing: the entire visible effect is eight labels
+    in one file, all of them already written the way this emits them.
+
+    The statement after the colon is built by **its own rule**, not emitted as
+    part of this span, for the reason ``procedural._match_choice`` gives at
+    length: emitting the whole thing as one run of tokens would work and would
+    mean the traversal builder never ran, so ``T-30`` would report a rule
+    nothing reaches while the output looked right. Which makes this a token
+    *composition* site, with the lexical floor that entails.
+
+    No column stop. ``procedural._after_the_colon`` places one because the
+    corpus builds four hand-aligned tables of match arms in four files; there
+    is no such evidence for labels, and there could not be -- one file.
+    """
+    colon = _label_colon(node)
+    statement = _labelled_statement(node)
+    if colon is None or statement is None:
+        return _reproduce(ctx, node)
+    span = code_span(ctx.trivia, node)
+    if span is None:
+        return _reproduce(ctx, node)
+    trivia = ctx.trivia
+    code = trivia.code_indices
+    colon_pos = code.index(colon.token_index)
+    if colon_pos >= span[1]:
+        return _reproduce(ctx, node)
+    label = emit_span(ctx, span[0], colon_pos, _LABEL_VOCABULARY)
+    if label is None:
+        return _reproduce(ctx, node)
+    gap = floor_gap(ctx.style.gap(Site.COLON_LABEL, None),
+                    trivia.of(code[colon_pos]).token,
+                    trivia.of(code[colon_pos + 1]).token)
+    return concat([label, text(" " * gap), ctx.build(statement)])
+
+
+def _if_branches(node: Any):
+    """``(then_block, else_stmt)`` for an activity ``if``, or ``(None, None)``.
+
+    The activity twin of ``procedural._branches``, and the same shape:
+    ``activity_if_else_stmt`` is ``'if' '(' expression ')' activity_stmt_ann
+    ('else' activity_stmt_ann)?``, with the braces one level down inside an
+    ``activity_sequence_block_stmt``.
+    """
+    from .decls import _effective
+
+    seen_else = False
+    then_block = else_stmt = None
+    for child in node.children:
+        if not child.is_rule:
+            if getattr(child.token, "type_name", None) == "TOK_ELSE":
+                seen_else = True
+            continue
+        if child.rule_name != "activity_stmt_ann":
+            continue
+        inner = _effective(child)
+        if seen_else:
+            else_stmt = inner
+        elif getattr(inner, "rule_name", None) \
+                == "activity_sequence_block_stmt":
+            then_block = inner
+    return then_block, else_stmt
+
+
+def _clean_before(ctx: Any, pos: int) -> bool:
+    """Whether the gap before code position *pos* holds only whitespace.
+
+    The two seams a tail creates are outside every span, so nothing else
+    checks them. See ``procedural._nothing_but_whitespace_before``, where the
+    dropped-comment defect this prevents was actually found.
+    """
+    code = ctx.trivia.code_indices
+    if pos <= 0 or pos >= len(code):
+        return False
+    run = list(ctx.trivia.of(code[pos - 1]).raw_trailing) \
+        + list(ctx.trivia.of(code[pos]).raw_leading)
+    return all(not tok.text.strip() for tok in run)
+
+
+def _if_else(ctx: Any, node: Any) -> Layout:
+    """``if (use_dma) { … } else { … }`` in an activity (``S-1``).
+
+    One corpus instance, and it is the same decision as the procedural one
+    rather than a second one: ``docs/style.rst`` decides where ``} else {``
+    goes for the language, not per construct. What this module contributes is
+    that the *body* is an activity body, so the members inside are
+    traversals with their own rules.
+
+    Deliberately not shared with ``procedural._if_else``. The two differ in
+    every node name they touch -- ``activity_stmt_ann`` against
+    ``procedural_stmt``, ``activity_sequence_block_stmt`` against
+    ``procedural_sequence_block_stmt`` -- so a shared helper would be a
+    parameter list of grammar names, which is a worse thing to read than the
+    duplication and a worse thing to be wrong about.
+    """
+    then_block, else_stmt = _if_branches(node)
+    if then_block is None:
+        return _reproduce(ctx, node)
+    sites = sites_for(ctx, node, extra_rules=_IF_SITES)
+    if sites is None:
+        return _reproduce(ctx, node)
+
+    tail = None
+    if else_stmt is not None:
+        name = getattr(else_stmt, "rule_name", None)
+        if name == "activity_if_else_stmt":
+            otherwise = _if_else(ctx, else_stmt)
+        elif name == "activity_sequence_block_stmt":
+            otherwise = _block(ctx, else_stmt, Construct.ELSE_BODY)
+        else:
+            return _reproduce(ctx, node)
+        span = code_span(ctx.trivia, then_block)
+        if span is None or not _clean_before(ctx, span[1] + 1) \
+                or not _clean_before(ctx, span[1] + 2) \
+                or isinstance(otherwise, Verbatim):
+            return _reproduce(ctx, node)
+        tail = concat([
+            text(" " * ctx.style.gap(Site.BLOCK_TAIL, None) + "else"
+                 + " " * ctx.style.gap(None, Site.BLOCK_TAIL)),
+            otherwise,
+        ])
+    return _block(ctx, node, Construct.IF_BODY, body=then_block,
+                  vocabulary=_BLOCK_HEADER_VOCABULARY, sites=sites, tail=tail)
+
+
 def register(registry) -> None:
     """Binds this module's builders. See ``decls.register`` on why a function."""
 
     def _make_block(construct):
         def builder(ctx, node):
-            if node.rule_name == _ANONYMOUS_BLOCK and not _has_keyword(node):
-                return _reproduce(ctx, node)
             # ``sites={}`` rather than left to default, since ``P3-11a``:
             # ``None`` there is now a decline, and these headers are a
             # keyword and a brace -- there is genuinely nothing for the tree
@@ -395,5 +557,7 @@ def register(registry) -> None:
 
     registry.register("activity_repeat_stmt", _repeat)
     registry.register("activity_bind_stmt", _bind)
+    registry.register("activity_labeled_stmt", _labelled)
+    registry.register("activity_if_else_stmt", _if_else)
     for rule_name in _TRAVERSAL_RULES:
         registry.register(rule_name, _traversal)

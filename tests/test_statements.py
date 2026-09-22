@@ -283,13 +283,22 @@ class TestWhatDeclines:
     """Every refusal from mis-spaced input, so that "declined" and "agreed"
     are different files."""
 
-    def test_if_else_is_reproduced(self):
-        """5 instances in 3 files, and it needs the ``} else {`` rule
-        ``docs/style.rst`` does not state -- the same reason ``P3-5`` declined
-        ``if`` constraints on one instance. It hides 7 statements, which is
-        the price and is recorded rather than paid quietly."""
-        assert body("        if (n > 0)  { n  -=  1; } else { n  +=  1; }") == [
-            "        if (n > 0)  { n  -=  1; } else { n  +=  1; }"]
+    def test_an_unbraced_branch_is_reproduced(self):
+        """``if (x) y;`` is legal PSS, and ``S-1`` did not decide it.
+
+        Laying it out needs a second decision -- on the same line, or broken
+        and indented? -- and **inserting braces is not an option**: that
+        changes the token stream. So the whole statement declines, which is
+        the conservative half of ``S-1`` and the half most likely to be
+        "tidied up" later by someone who reads the cuddle rule and not this.
+        """
+        assert body("        if (n > 0)  n  -=  1;") == [
+            "        if (n > 0)  n  -=  1;"]
+
+    def test_an_unbraced_else_is_reproduced_too(self):
+        """The branch that declines can be either one."""
+        assert body("        if (n > 0) { n -= 1; } else  n  +=  1;") == [
+            "        if (n > 0) { n -= 1; } else  n  +=  1;"]
 
     def test_repeat_while_is_reproduced(self):
         """Two reasons, and the second is structural rather than stylistic:
@@ -298,14 +307,6 @@ class TestWhatDeclines:
         everything after the closing brace would be dropped."""
         assert body("        repeat { n += 1; } while (n < 4);") == [
             "        repeat { n += 1; } while (n < 4);"]
-
-    def test_a_labelled_repeat_is_reproduced(self):
-        """``repeat (i : n)`` -- 6 of the corpus's 11. The colon is a fifth
-        reading of a character ``docs/style.rst`` already splits four ways,
-        and ``activities.py`` declined the identical construct for the
-        identical reason."""
-        assert body("        repeat (i : 4) { n  +=  1; }") == [
-            "        repeat (i : 4) { n  +=  1; }"]
 
     def test_a_wrapped_arm_is_reproduced(self):
         """The same rule one level in, and it is load-bearing for the same
@@ -327,16 +328,6 @@ class TestWhatDeclines:
             "            [1]: return 1;",
             "        }",
         ]
-
-    def test_a_wrapped_statement_is_reproduced(self):
-        """``P3-11a``'s rule at a second construct, on the same evidence:
-        ``emit_span`` discards newlines, so formatting a wrapped statement is
-        joining it, and six of the corpus's seven wrapped calls join to
-        between 86 and 108 columns."""
-        assert body("        message(NONE, \"a very long message indeed\",\n"
-                    "                a, b, c);") == [
-            "        message(NONE, \"a very long message indeed\",",
-            "                a, b, c);"]
 
     def test_a_bit_slice_declines(self):
         """``a[3:0] = x;``. ``Site.COLON_BIT_SLICE`` is tight and
@@ -522,3 +513,146 @@ class TestSafety:
         once = fmt(src)
         assert fmt(once) == once
         assert "            default: {" in once
+
+
+class TestControlFlow:
+    """``T-44`` -- ``S-1``, and ``S-5``'s procedural half.
+
+    ``if``/``else`` was the largest construct the formatter declined, and it
+    was declined in three modules at once for one reason: nothing said where
+    ``} else {`` goes. The corpus could not say -- 5 instances in 3 files,
+    and they do not agree -- so the rule is **argued**, from K&R, the Linux
+    kernel, Google C++ and lowRISC, all of which cuddle. Allman appears
+    nowhere in the corpus.
+
+    The loops came along with it because they are the same shape: a header,
+    then a ``procedural_stmt`` wrapping a braced block.
+    """
+
+    @pytest.mark.parametrize("src", [
+        "if(n>0){n-=1;}else{n+=1;}",
+        "if (n > 0) { n -= 1; }\n        else { n += 1; }",
+        "if (n > 0)\n        {\n            n -= 1;\n        }\n"
+        "        else\n        {\n            n += 1;\n        }",
+    ], ids=["tight", "else-on-its-own-line", "allman"])
+    def test_the_else_is_cuddled(self, src: str):
+        assert body("        " + src) == [
+            "        if (n > 0) {",
+            "            n -= 1;",
+            "        } else {",
+            "            n += 1;",
+            "        }",
+        ]
+
+    def test_an_if_without_an_else(self):
+        assert body("        if(n>0){n-=1;}") == [
+            "        if (n > 0) {",
+            "            n -= 1;",
+            "        }",
+        ]
+
+    def test_a_chain_does_not_staircase(self):
+        """The one place the obvious recursion is wrong.
+
+        ``else if`` is not a construct in PSS -- it is an ``else`` whose
+        statement is another ``if`` -- so building the else branch and
+        indenting it like a body produces a staircase that grows a level per
+        branch. Three branches, because two would pass with the nesting only
+        half wrong.
+        """
+        assert body("        if(a){x=1;}else if(b){x=2;}else if(c){x=3;}"
+                    "else{x=4;}") == [
+            "        if (a) {",
+            "            x = 1;",
+            "        } else if (b) {",
+            "            x = 2;",
+            "        } else if (c) {",
+            "            x = 3;",
+            "        } else {",
+            "            x = 4;",
+            "        }",
+        ]
+
+    def test_it_nests_inside_another_if(self):
+        """A *genuine* nesting, which must indent -- the other half of the
+        test above, and the one that fails if the flat composition is applied
+        to a branch rather than to a chain."""
+        assert body("        if(a){if(b){x=1;}}") == [
+            "        if (a) {",
+            "            if (b) {",
+            "                x = 1;",
+            "            }",
+            "        }",
+        ]
+
+    def test_a_comment_between_the_brace_and_the_else_declines(self):
+        """``} /* why */ else {`` is a question about where comments go, not
+        about where ``else`` goes, and ``emit_span`` already refuses any span
+        holding one."""
+        src = "        if (a) { x = 1; } /* why */ else { x = 2; }"
+        assert body(src) == [src]
+
+    def test_the_gap_comes_from_the_style(self):
+        out = body("        if (a) { x = 1; } else { x = 2; }",
+                   Style(spacing_overrides={Site.BLOCK_TAIL: Spacing(0, 0)}))
+        assert out[2] == "        }else{"
+
+    @pytest.mark.parametrize("src,expected", [
+        ("foreach(i:list){x=1;}", "foreach (i : list) {"),
+        ("foreach ( i : list [ j ] ){x=1;}", "foreach (i : list[j]) {"),
+        ("repeat(i:4){x=1;}", "repeat (i : 4) {"),
+        ("repeat(4){x=1;}", "repeat (4) {"),
+        ("while(a<b){x=1;}", "while (a < b) {"),
+    ], ids=["foreach", "foreach-index", "repeat-iterator", "repeat-count",
+            "while"])
+    def test_the_loops(self, src: str, expected: str):
+        out = body("        " + src)
+        assert out == ["        " + expected, "            x = 1;", "        }"]
+
+    def test_repeat_while_still_declines(self):
+        """The block sits in the *middle* of the statement. ``_block`` can
+        express that now -- it grew a tail for ``else`` -- but the tail would
+        be a whole statement rather than a keyword and a layout, and the
+        corpus contains none of these. Declined deliberately, not omitted.
+        """
+        assert body("        repeat { n += 1; } while (n < 4);") == [
+            "        repeat { n += 1; } while (n < 4);"]
+
+    def test_a_while_loop_is_not_mistaken_for_a_repeat_while(self):
+        """Both spellings are ``procedural_repeat_stmt`` and both contain a
+        ``while``; they differ in *where the block sits*. Looking for the
+        token declined ``while (x) { … }`` too, which is how this test
+        exists."""
+        assert body("        while (n < 4) { n += 1; }")[0] == \
+            "        while (n < 4) {"
+
+    def test_a_break_inside_a_loop_is_reached(self):
+        """The reach half of the item. ``break`` and ``continue`` had rules
+        and no reachable instance in the corpus, because both of the corpus's
+        sit inside an ``if`` that declined -- so a rule can only run on a node
+        whose ancestors all have rules."""
+        assert body("        while (a) { break ; }") == [
+            "        while (a) {",
+            "            break;",
+            "        }",
+        ]
+
+    @pytest.mark.parametrize("src", [
+        "        if(a){x=1;}else if(b){x=2;}else{x=3;}",
+        "        foreach(i:list){if(a){break;}else{continue;}}",
+        "        while(a){repeat(i:4){x=1;}}",
+    ], ids=["chain", "nested", "loops"])
+    def test_it_is_idempotent(self, src: str):
+        once = fmt("component c {\n    function void f() {\n%s\n    }\n}\n" % src)
+        assert fmt(once) == once
+
+    @pytest.mark.parametrize("src", [
+        "        if(a){x=1;}else{x=2;}",
+        "        foreach(i:list){x=1;}",
+        "        if (a) y;",
+    ], ids=["if-else", "foreach", "unbraced"])
+    def test_the_verifier_accepts_it(self, src: str):
+        result = format_safely(
+            "component c {\n    function void f() {\n%s\n    }\n}\n" % src,
+            formatter=format_source)
+        assert result.ok, result.diagnostic()

@@ -32,12 +32,14 @@ component fn_c {
     }
 
     // Declined header, formatted body: a hand-built parameter table joins to
-    // 90-odd columns and there is no parameter-list break policy, so the
-    // header is reproduced -- while everything inside the braces is not.
+    // 90-odd columns. `S-16` gave the parameter list a break policy and
+    // `S-17` removed the refusal, so it is joined and re-broken from its
+    // content -- the hand-built column is the accepted cost of `S-16d`.
     target function void check(
-        addr_handle_t  base,
-        bit[32]        nbytes,
-        bit[32]        seed) {
+        addr_handle_t base,
+        bit[32] nbytes,
+        bit[32] seed
+    ) {
         int nwords = nbytes / 4;
         bit[32]  expected;
         bit[32]  actual;
@@ -96,13 +98,36 @@ component fn_c {
         }
     }
 
-    // Declined, and each for its own reason. `if`/`else` needs the `} else {`
-    // rule `docs/style.rst` does not state; `repeat … while` puts its block in
-    // the *middle* of the statement, which the block layout cannot express.
+    // Control flow. `S-1` cuddles the `else` and `S-5` spaces the iterator
+    // colon; a chain is composed flat so it does not staircase.
+    function void control(int n) {
+        if (n > 0) {
+            n -= 1;
+        } else if (n < 0) {
+            n += 1;
+        } else {
+            n = 0;
+        }
+        foreach (i : chans) {
+            poke(i);
+        }
+    }
+
+    // Two still declined, and a third that is not. An unbraced branch would
+    // need braces inserted, which changes the token stream; `repeat … while`
+    // puts its block in the *middle* of the statement, so its tail would be a
+    // whole statement rather than a keyword. The wrapped call below *is*
+    // formatted now -- joined and re-broken by `S-16`/`S-17`, and it comes
+    // out identical to the same call written on one line.
     function void declined(int n) {
-        if (n > 0)  { n  -=  1; } else { n  +=  1; }
+        if (n > 0)  n  -=  1;
         repeat { n += 1; } while (n < 4);
-        message(NONE, "a call the author wrapped, which joins past the width",
-                n, n, n);
+        message(
+            NONE,
+            "a call the author wrapped, which joins past the width",
+            n,
+            n,
+            n
+        );
     }
 }

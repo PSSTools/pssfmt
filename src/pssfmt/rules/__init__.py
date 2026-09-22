@@ -244,6 +244,7 @@ def build_tree(tree: Any,
         mode=style.alignment,
         boundary=style.alignment_group_boundary,
         print_width=style.print_width,
+        comment_spacing=style.spaces_before_trailing_comment,
     )
     # Trivia after the last code token belongs to no node, so no builder can
     # emit it. Dropping it truncates the file -- usually by exactly the final

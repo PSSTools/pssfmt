@@ -135,10 +135,18 @@ out. That split is what a header decline had to be worth: see
 :func:`~pssfmt.rules.decls._header` on why ``sites=None`` stopped meaning the
 same thing as ``sites={}``.
 
-**Varargs.** ``function void varargs(int... args)`` -- one instance, one file.
-``TOK_TRIPLE_ELIPSIS`` is left out of the vocabulary, so it declines. Its
-spacing is expressible (``Spacing(0, 1)``, the comma's shape) and that is
-precisely the trap: a site invented from a single instance looks measured.
+**Varargs** landed with ``S-14``, and the shape of the argument is the part
+worth keeping. ``function void varargs(int... args)`` is one instance in one
+file, and this module used to decline it on exactly that basis -- noting that
+the spacing was expressible as ``Spacing(0, 1)``, *the comma's shape*, and
+that borrowing a number from an unrelated site is how a site invented from a
+single instance comes to look measured.
+
+The decline was right and the reasoning about the number still is.
+``Site.VARARGS`` is that value, and it is argued from **C's**
+``printf(const char *fmt, ...)`` rather than from the comma: tight against
+what precedes it, one space before the name. Same number, different claim,
+and the comment in ``style.py`` says which.
 
 **A one-line body.** Not collapsed; see above.
 
@@ -209,13 +217,14 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..layout import ALIGN_MARK, concat, text
-from ..layout.ir import Layout
+from ..layout.ir import Layout, Verbatim
 from ..style import Construct, Site
 from .decls import _block, _braces, _reproduce, sites_before
 from .emit import code_span
-from .exprs import EXPRESSION_VOCABULARY, TREE_DECIDED, sites_for
+from .exprs import (EXPRESSION_COLON, EXPRESSION_VOCABULARY, TREE_DECIDED,
+                    sites_for, wrap_for)
 from .stmts import after_a_width_bracket
-from .tokens import WORD, emit_span, floor_gap, original_gap
+from .tokens import WORD, emit_span, flat_width, floor_gap, original_gap
 
 __all__ = ["register"]
 
@@ -237,7 +246,8 @@ __all__ = ["register"]
 #: language rather than a shared decision, which is why the two vocabularies
 #: are separate objects and not one shared set.
 #:
-#: ``TOK_TRIPLE_ELIPSIS`` is deliberately absent -- see the module docstring.
+#: ``TOK_TRIPLE_ELIPSIS`` is ``Site.VARARGS`` (``S-14``); it was deliberately
+#: absent until then, and the module docstring records why.
 _PROTOTYPE_VOCABULARY = dict(EXPRESSION_VOCABULARY)
 _PROTOTYPE_VOCABULARY.update((name, WORD) for name in (
     "TOK_FUNCTION", "TOK_PURE", "TOK_STATIC", "TOK_IMPORT",
@@ -251,6 +261,8 @@ _PROTOTYPE_VOCABULARY.update((name, WORD) for name in (
 ))
 #: ``bit[64] offset = 0`` -- a parameter's default value.
 _PROTOTYPE_VOCABULARY["TOK_SINGLE_EQ"] = Site.ASSIGN
+#: ``int... args`` -- the varargs parameter (``S-14``).
+_PROTOTYPE_VOCABULARY["TOK_TRIPLE_ELIPSIS"] = Site.VARARGS
 
 #: ``function void f(...) {`` -- the header of a definition.
 _FUNCTION_HEADER_VOCABULARY = dict(_PROTOTYPE_VOCABULARY)
@@ -279,6 +291,31 @@ def _prototype(node: Any) -> Optional[Any]:
     return None
 
 
+def _joins_usefully(ctx: Any, node: Any, span: Any, emitted: Any,
+                    wrap: Any) -> bool:
+    """Whether joining *node* produces something the engine can lay out.
+
+    ``S-17``'s guard, and it is about **width** rather than about whether the
+    author wrapped anything. Joining a wrapped construct is what
+    :func:`~pssfmt.rules.tokens.emit_span` is for; what it could not do before
+    ``S-16`` is break the result, so six of the corpus's seven wrapped calls
+    joined to between 86 and 108 columns and the construct was reproduced.
+
+    With a break policy the question narrows to exactly one case: a construct
+    the author wrapped, that holds **no** list this can break, and whose
+    joined form is past the width. There the author's line stands -- worse
+    than a rule, and better than a line the tool has decided it cannot break
+    and emitted anyway.
+
+    Anything that fits is joined, wrapped or not, which is what ``S-16d``
+    decided: width decides, not the author's wrap.
+    """
+    if wrap is not None or not _wrapped(ctx, node):
+        return True
+    origin = ctx.trivia.of(ctx.trivia.code_indices[span[0]]).token.col
+    return origin + flat_width(emitted) <= ctx.style.print_width
+
+
 def _wrapped(ctx: Any, node: Any) -> bool:
     """Whether the author broke *node* across lines.
 
@@ -299,16 +336,17 @@ def _wrapped(ctx: Any, node: Any) -> bool:
 def _header_sites(ctx: Any, node: Any, limit: int) -> Any:
     """Sites for the header's tree-decided tokens, or ``None`` to decline.
 
-    Two triggers, and they are different kinds of refusal. A construct
-    :mod:`pssfmt.rules.exprs` declines -- ``a**2`` in a default value -- is a
-    site nobody has measured. A **wrapped prototype** is a decision nobody has
-    made: the tokens are all classifiable and joining them is what would be
-    wrong. Both reproduce the header, and only the second is a policy gap
-    rather than a vocabulary one.
+    One trigger now, and it used to be two. A construct
+    :mod:`pssfmt.rules.exprs` declines -- a map literal in a default value --
+    is a site nobody has measured, and that one remains.
+
+    A **wrapped prototype** was the other, and it was a *policy* gap rather
+    than a vocabulary one: every token was classifiable and joining them was
+    the only thing this could do, which for the corpus's five instances means
+    90 to 100 columns. ``S-16`` gave the parameter list a break policy and
+    ``S-17`` removed the refusal, so a wrapped prototype is now joined and
+    re-broken from its content.
     """
-    prototype = _prototype(node)
-    if _wrapped(ctx, prototype if prototype is not None else node):
-        return None
     return sites_before(ctx, node, limit)
 
 
@@ -342,9 +380,15 @@ def procedural_function(ctx: Any, node: Any) -> Layout:
     sites = _header_sites(ctx, node, limit)
     if sites is None:
         return _block(ctx, node, Construct.FUNCTION_BODY)
+    # `S-16`/`S-17`: the parameter list may break. Asked of the *prototype*
+    # rather than of the whole node, so a list inside the body -- a call in
+    # the first statement -- is not offered as this header's wrap.
+    prototype = _prototype(node)
+    scope = prototype if prototype is not None else node
+    wrap = wrap_for(ctx, scope)
     return _block(ctx, node, Construct.FUNCTION_BODY,
                   vocabulary=_FUNCTION_HEADER_VOCABULARY, sites=sites,
-                  separate=after_a_width_bracket)
+                  separate=after_a_width_bracket, wrap=wrap)
 
 
 def _declaration(ctx: Any, node: Any) -> Layout:
@@ -366,9 +410,13 @@ def _declaration(ctx: Any, node: Any) -> Layout:
     sites = _header_sites(ctx, node, span[1] + 1)
     if sites is None:
         return _reproduce(ctx, node)
+    wrap = wrap_for(ctx, node)
     emitted = emit_span(ctx, span[0], span[1], _FUNCTION_DECL_VOCABULARY,
-                        separate=after_a_width_bracket, sites_at=sites)
-    return emitted if emitted is not None else _reproduce(ctx, node)
+                        separate=after_a_width_bracket, sites_at=sites,
+                        wrap=wrap)
+    if emitted is None or not _joins_usefully(ctx, node, span, emitted, wrap):
+        return _reproduce(ctx, node)
+    return emitted
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +450,10 @@ _ASSIGN_OPS = frozenset((
 ))
 _STATEMENT_VOCABULARY.update((name, Site.ASSIGN) for name in _ASSIGN_OPS)
 _STATEMENT_VOCABULARY["TOK_SEMICOLON"] = Site.SEMICOLON
+# `S-10`: a `:` in a procedural statement is a bit slice or a ternary. The
+# match arm's colon is a different span with a different vocabulary --
+# `_CHOICE_VOCABULARY` below, which sets its own and must keep doing so.
+_STATEMENT_VOCABULARY.update(EXPRESSION_COLON)
 
 #: ``match (name) {`` -- a keyword, a control paren and a brace.
 _MATCH_HEADER_VOCABULARY = dict(EXPRESSION_VOCABULARY)
@@ -534,21 +586,36 @@ def _statement(ctx: Any, node: Any) -> Layout:
     span = code_span(ctx.trivia, node)
     if span is None:
         return _reproduce(ctx, node)
-    if _wrapped(ctx, node):
-        # The author's line breaks, kept for ``P3-11a``'s reason and on the
-        # same evidence: ``emit_span`` discards newlines, so formatting a
-        # wrapped statement is *joining* it, and six of the corpus's seven
-        # wrapped calls join to between 86 and 108 columns. Choosing which
-        # argument to break after is a policy ``docs/style.rst`` leaves open;
-        # until it does not, the author's choice stands.
-        return _reproduce(ctx, node)
+    # `S-17`. A statement the author wrapped used to be reproduced, and the
+    # reason was never that joining it was wrong -- it was that `emit_span`
+    # discards newlines, so joining was all this could do, and six of the
+    # corpus's seven wrapped calls join to between 86 and 108 columns.
+    #
+    # `S-16` supplied the missing half, and the guard below is where the two
+    # meet: **join only where there is somewhere to break.** A statement the
+    # author wrapped that holds a list is joined and re-broken from its
+    # *content*, which is the property that makes this correct rather than
+    # merely possible -- the same call written on one line and across four
+    # now produce the same output. One that holds no list, or two of them,
+    # has nowhere to break, and joining it would produce exactly the 86-to-108
+    # column line the old decline existed to avoid. So the author's wrap
+    # stands there, as it always did.
+    #
+    # Worth being plain that this is narrower than `S-16d`, which says width
+    # decides rather than the author's wrap. It does -- wherever the tool can
+    # decide. Where it cannot break the line at all, "width decides" would
+    # mean emitting a line that violates the width, which decides nothing.
+    wrap = wrap_for(ctx, node)
     sites = sites_for(ctx, node)
     if sites is None:
         return _reproduce(ctx, node)
     emitted = emit_span(ctx, span[0], span[1], _STATEMENT_VOCABULARY,
                         separate=_after_return, sites_at=sites,
-                        mark_at=_assign_stop(ctx, span))
-    return emitted if emitted is not None else _reproduce(ctx, node)
+                        mark_at=_assign_stop(ctx, span),
+                        wrap=wrap)
+    if emitted is None or not _joins_usefully(ctx, node, span, emitted, wrap):
+        return _reproduce(ctx, node)
+    return emitted
 
 
 def _assign_stop(ctx: Any, span: tuple) -> tuple:
@@ -787,6 +854,265 @@ def _exec_block(ctx: Any, node: Any) -> Layout:
                   vocabulary=_EXEC_HEADER_VOCABULARY, sites={})
 
 
+#: ``if (x) {``, ``foreach (i : list) {``, ``repeat (i : 4) {``,
+#: ``while (x) {`` -- and ``repeat {``, which is a keyword and a brace.
+#:
+#: The ``:`` here is :data:`~pssfmt.rules.exprs.EXPRESSION_COLON`'s bit-slice
+#: fallback, **not** the iterator (``S-5``). An iterator colon is a *direct*
+#: terminal of the loop rule and is assigned from the tree in
+#: :func:`_control_block`; a colon anywhere else in a control header is inside
+#: the condition, where it is a bit slice -- ``if (a[3:0] == 0) {``.
+#:
+#: Which is a distinction the vocabulary cannot draw, and getting it the other
+#: way round is invisible until somebody writes such a condition. The case
+#: that reaches this code is a cast -- ``if ((bit[3:0])x == 0) {`` -- because
+#: an expression's own ``bit_slice`` (``a[3:0]``) declines a step earlier on
+#: its unclassified brackets, while ``integer_type``'s width slice does not.
+#: Naming ``TOK_COLON`` as the iterator here emits ``(bit[3 : 0])x``.
+_CONTROL_HEADER_VOCABULARY = dict(EXPRESSION_VOCABULARY)
+_CONTROL_HEADER_VOCABULARY.update((name, WORD) for name in (
+    "TOK_IF", "TOK_FOREACH", "TOK_REPEAT", "TOK_WHILE",
+))
+_CONTROL_HEADER_VOCABULARY.update(EXPRESSION_COLON)
+_CONTROL_HEADER_VOCABULARY["TOK_LCBRACE"] = Site.BRACE_OPEN
+
+#: A control statement's own parens, unclaimed by any expression rule --
+#: the same mechanism and the same argument as :data:`_MATCH_SITES`, and the
+#: constructs ``Site.CONTROL_PAREN_*``'s 118/118 was actually measured on.
+_CONTROL_SITES = {
+    "TOK_LPAREN": Site.CONTROL_PAREN_OPEN,
+    "TOK_RPAREN": Site.CONTROL_PAREN_CLOSE,
+}
+
+
+def _direct_terminal(node: Any, type_name: str) -> Optional[Any]:
+    """*node*'s own terminal of *type_name*, or ``None``.
+
+    Direct children only, which is the whole of the iterator colon's
+    classification: ``foreach (i : a[3:0])`` holds two colons and exactly one
+    of them is this node's.
+    """
+    for child in node.children:
+        if not child.is_rule and child.token is not None \
+                and child.token.type_name == type_name:
+            return child
+    return None
+
+#: Loop rules, and the body construct each is laid out under.
+_LOOP_RULES = {
+    "procedural_foreach_stmt": Construct.LOOP_BODY,
+    "procedural_repeat_stmt": Construct.LOOP_BODY,
+}
+
+
+def _braced_body(node: Any) -> Optional[Any]:
+    """The ``{ … }`` a control statement wraps, or ``None``.
+
+    ``procedural_stmt`` is a passthrough wrapper, so the block is one level
+    down; :func:`~pssfmt.rules.decls._effective` is what looks through it.
+
+    ``None`` means the branch is a bare statement -- ``if (x) y;`` is legal
+    PSS -- and every caller here treats that as a decline. **Inserting braces
+    is not an option**: it changes the token stream, which is the one thing
+    this formatter does not do, and laying the statement out without them
+    needs a second decision (on the same line, or broken and indented?) that
+    ``docs/style.rst`` has not made and five instances cannot.
+    """
+    from .decls import _effective
+
+    for child in node.children:
+        if child.is_rule and child.rule_name == "procedural_stmt":
+            inner = _effective(child)
+            if getattr(inner, "rule_name", None) \
+                    == "procedural_sequence_block_stmt":
+                return inner
+            return None
+    return None
+
+
+def _branches(node: Any):
+    """``(then_block, else_stmt)`` for an ``if``, or ``(None, None)``.
+
+    Both halves come from the *direct* children, and the ``else`` half is
+    found by position relative to ``TOK_ELSE`` rather than by taking the
+    second ``procedural_stmt``. Same answer today; the positional version
+    stops being right the moment the grammar grows an alternative, and it
+    reads as though it were checking something it is not.
+    """
+    from .decls import _effective
+
+    seen_else = False
+    then_block = else_stmt = None
+    for child in node.children:
+        if not child.is_rule:
+            if getattr(child.token, "type_name", None) == "TOK_ELSE":
+                seen_else = True
+            continue
+        if child.rule_name != "procedural_stmt":
+            continue
+        if seen_else:
+            else_stmt = _effective(child)
+        else:
+            inner = _effective(child)
+            if getattr(inner, "rule_name", None) \
+                    == "procedural_sequence_block_stmt":
+                then_block = inner
+    return then_block, else_stmt
+
+
+def _control_block(ctx: Any, node: Any, body: Any, construct: Construct,
+                   tail: Optional[Layout] = None) -> Optional[Layout]:
+    """``<header> { … }`` with *tail* after the brace, or ``None`` to decline.
+
+    The header runs from *node*'s first token to *body*'s ``{``, across two
+    nodes, which is what ``_block``'s *body* parameter is for.
+    """
+    braces = _braces(body)
+    if braces is None:
+        return None
+    limit = ctx.trivia.code_indices.index(
+        body.children[braces[0]].token_index)
+    sites = _sites_through(ctx, node, limit, _CONTROL_SITES)
+    if sites is None:
+        return None
+    iterator = _direct_terminal(node, "TOK_COLON")
+    if iterator is not None:
+        code = ctx.trivia.code_indices
+        sites[code.index(iterator.token_index)] = Site.COLON_ITERATOR
+    return _block(ctx, node, construct, body=body,
+                  vocabulary=_CONTROL_HEADER_VOCABULARY, sites=sites,
+                  tail=tail)
+
+
+def _nothing_but_whitespace_before(ctx: Any, pos: int) -> bool:
+    """Whether the gap before code position *pos* holds only whitespace.
+
+    The check :func:`~pssfmt.rules.tokens.emit_span` makes for every seam
+    inside a span, applied at the two seams a *tail* creates -- which are
+    outside every span, because the whole point of a tail is that it joins
+    two layouts across the ``}`` between them.
+
+    ``} /* why */ else {`` is the case, and it was a real defect rather than
+    a hypothetical: the comment sits in trivia that neither the block's last
+    token nor the tail's first one owns, so it was **dropped**. The verifier
+    caught it -- a lost comment is a token-equivalence failure and the file
+    came back unchanged with a diagnostic -- which is the fail-safe working
+    and is not the same as the rule being right. Where a comment goes
+    relative to an ``else`` is a question about comments, and this module has
+    no opinion worth acting on; it declines.
+    """
+    code = ctx.trivia.code_indices
+    if pos <= 0 or pos >= len(code):
+        return False
+    run = list(ctx.trivia.of(code[pos - 1]).raw_trailing) \
+        + list(ctx.trivia.of(code[pos]).raw_leading)
+    return all(not tok.text.strip() for tok in run)
+
+
+def _after_the_brace(ctx: Any, keyword: str) -> Layout:
+    """The gap between a ``}`` and the keyword cuddled against it.
+
+    ``Site.BLOCK_TAIL``, and a literal would be a ``T-13`` failure. There is
+    no lexical floor to apply: ``}`` is neither a word character nor half of
+    a longer lexeme, so nothing here can merge however the site is configured.
+    """
+    return text(" " * ctx.style.gap(Site.BLOCK_TAIL, None)
+                + keyword
+                + " " * ctx.style.gap(None, Site.BLOCK_TAIL))
+
+
+def _if_else(ctx: Any, node: Any) -> Layout:
+    """``if (x) { … }``, ``} else { … }``, ``} else if (y) { … }`` (``S-1``).
+
+    Cuddled, and that is argued rather than measured: 5 instances in 3 files
+    is not a measurement and they do not agree. Every comparable guide does --
+    K&R, the Linux kernel, Google C++, lowRISC -- and Allman appears nowhere
+    in this corpus, so the alternative is a shape no voice here is asking for.
+
+    **The chain is the part that is wrong by default.** ``else if`` is not a
+    construct in PSS: it is an ``else`` whose statement is another
+    ``procedural_if_else_stmt``, so the obvious recursion -- build the else
+    branch and indent it like a body -- produces a staircase::
+
+        } else {
+            if (b) {
+
+    The nested ``if`` is therefore composed *flat*, with no indent and no
+    line break, which is the whole of what makes ``} else if (b) {`` come out
+    on one line. Pinned by a three-branch chain in ``T-44``, because a green
+    suite will not otherwise notice.
+
+    A branch that is not braced declines the whole statement. See
+    :func:`_braced_body`.
+    """
+    then_block, else_stmt = _branches(node)
+    if then_block is None:
+        return _reproduce(ctx, node)
+    if else_stmt is None:
+        laid = _control_block(ctx, node, then_block, Construct.IF_BODY)
+        return laid if laid is not None else _reproduce(ctx, node)
+
+    name = getattr(else_stmt, "rule_name", None)
+    if name == "procedural_if_else_stmt":
+        # The chain. Flat, deliberately: see the docstring.
+        otherwise = _if_else(ctx, else_stmt)
+    elif name == "procedural_sequence_block_stmt":
+        otherwise = _block(ctx, else_stmt, Construct.ELSE_BODY)
+    else:
+        return _reproduce(ctx, node)
+    # The two seams a tail creates: `}` to `else`, and `else` to whatever
+    # follows it. Both are outside any span, so nothing else checks them.
+    then_span = code_span(ctx.trivia, then_block)
+    if then_span is None \
+            or not _nothing_but_whitespace_before(ctx, then_span[1] + 1) \
+            or not _nothing_but_whitespace_before(ctx, then_span[1] + 2):
+        return _reproduce(ctx, node)
+    if isinstance(otherwise, Verbatim):
+        # The else half declined. Reproducing *it* inside a formatted `if`
+        # would put reproduced text after a composed gap, which is the one
+        # thing `_reproduce` exists to keep from happening mid-construct.
+        return _reproduce(ctx, node)
+    laid = _control_block(ctx, node, then_block, Construct.IF_BODY,
+                          tail=concat([_after_the_brace(ctx, "else"),
+                                       otherwise]))
+    return laid if laid is not None else _reproduce(ctx, node)
+
+
+def _loop(ctx: Any, node: Any) -> Layout:
+    """``foreach (i : list) { … }``, ``repeat (i : 4) { … }``, ``while (x) {``.
+
+    One builder for three keywords, because the grammar gives all three the
+    same shape: header tokens, then a ``procedural_stmt`` wrapping the block.
+
+    ``repeat { … } while (e);`` is the fourth alternative of
+    ``procedural_repeat_stmt`` and is **not** handled here. It puts its block
+    in the middle of the statement, which ``_block``'s *tail* can now express
+    -- but the tail would be a whole statement rather than a keyword and a
+    layout, and the corpus contains none of them. Declined, and named so that
+    it reads as a decision rather than an omission.
+    """
+    body = _braced_body(node)
+    if body is None or _has_a_tail(ctx, node, body):
+        return _reproduce(ctx, node)
+    laid = _control_block(ctx, node, body, _LOOP_RULES[node.rule_name])
+    return laid if laid is not None else _reproduce(ctx, node)
+
+
+def _has_a_tail(ctx: Any, node: Any, body: Any) -> bool:
+    """Whether anything of *node*'s follows *body*'s closing brace.
+
+    Which is the repeat-while form and nothing else. Asked as a question
+    about **shape** rather than by looking for ``TOK_WHILE``, and the first
+    version did look for the token: it also fired on ``while (x) { … }``,
+    whose ``while`` is its *first* token, and declined a loop that has no
+    tail at all. The two spellings share a keyword and differ in where the
+    block sits, so where the block sits is what to ask about.
+    """
+    span = code_span(ctx.trivia, node)
+    body_span = code_span(ctx.trivia, body)
+    return span is None or body_span is None or body_span[1] < span[1]
+
+
 _STATEMENT_RULES = (
     "procedural_return_stmt",
     "procedural_assignment_stmt",
@@ -826,3 +1152,6 @@ def register(registry: Any) -> None:
     registry.register("procedural_match_stmt", _match)
     registry.register("procedural_match_choice", _match_choice)
     registry.register("exec_block", _exec_block)
+    registry.register("procedural_if_else_stmt", _if_else)
+    for rule_name in _LOOP_RULES:
+        registry.register(rule_name, _loop)

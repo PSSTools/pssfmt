@@ -187,6 +187,41 @@ class TestDefaultsMatchTheEvidence:
         assert DEFAULT_STYLE.spacing_for(Site.MULTIPLICATIVE) == Spacing(1, 1)
         assert DEFAULT_STYLE.spacing_for(Site.COLON_LABEL) == Spacing(1, 1)
 
+    def test_the_argued_binary_operators_stay_spaced(self):
+        """``T-54`` -- ``S-11``, the operators the corpus could not decide.
+
+        Bitwise and shift total 14 instances, which is not a measurement, so
+        they follow lowRISC's "all binary operators" rule instead. Pinned
+        here for the same reason the two rules above are: nothing counted
+        them, so nothing else would notice them changing.
+        """
+        assert DEFAULT_STYLE.spacing_for(Site.BITWISE) == Spacing(1, 1)
+        assert DEFAULT_STYLE.spacing_for(Site.SHIFT) == Spacing(1, 1)
+
+    def test_implication_is_spaced_and_that_one_is_measured(self):
+        """The same value, a different claim: ``->`` is 6 / 6 across 5 files.
+
+        Kept as its own test rather than folded into the one above, because
+        folding them would lose exactly the distinction ``docs/style.rst``
+        spends a paragraph drawing.
+        """
+        assert DEFAULT_STYLE.spacing_for(Site.IMPLICATION) == Spacing(1, 1)
+
+    def test_the_argued_operators_are_labelled_as_argued_on_the_page(self):
+        """``docs/style.rst`` must not present them as counts.
+
+        The failure this catches is a later edit tidying the *argued* markers
+        into invented numbers, which is how a page that can be argued with
+        becomes one that merely looks authoritative.
+        """
+        doc = STYLE_DOC.read_text(encoding="utf-8")
+        for row in ("Around ``&`` ``|`` ``^``", "Around ``<<`` ``>>``"):
+            idx = doc.find(row)
+            assert idx != -1, f"docs/style.rst no longer states the rule for {row}"
+            assert "*argued*" in doc[idx:idx + 200], (
+                f"{row} is stated without its argued-not-measured marker"
+            )
+
     def test_print_width_matches_the_published_page(self):
         doc = STYLE_DOC.read_text(encoding="utf-8")
         match = re.search(r"``print_width`` defaults to \*\*(\d+)\*\*", doc)

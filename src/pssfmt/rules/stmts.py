@@ -72,7 +72,8 @@ from ..layout import Layout
 from ..style import Site
 from .emit import code_span
 from .exprs import ATOMS as _ATOMS
-from .exprs import EXPRESSION_VOCABULARY, WORD_LIKE, sites_for
+from .exprs import (EXPRESSION_COLON, EXPRESSION_LIST_BRACE,
+                    EXPRESSION_VOCABULARY, WORD_LIKE, sites_for, wrap_for)
 from .tokens import WORD, emit_span
 
 #: Field modifiers and the built-in scalar types. All word-class: they need
@@ -106,6 +107,13 @@ _DECLARATION_PUNCTUATION = {
 _FIELD_VOCABULARY = dict(EXPRESSION_VOCABULARY)
 _FIELD_VOCABULARY.update((name, WORD) for name in _MODIFIERS_AND_TYPES)
 _FIELD_VOCABULARY.update(_DECLARATION_PUNCTUATION)
+# `S-10`: a `:` in a field declaration is a bit slice or a ternary in the
+# initializer, and nothing else. See `exprs.EXPRESSION_COLON`.
+_FIELD_VOCABULARY.update(EXPRESSION_COLON)
+# `S-12`: `int a[4] = {1, 2, 3};`. A `{` in a field declaration can only
+# be an aggregate literal's -- the declaration ends at its `;` and a
+# body brace is a different production entirely.
+_FIELD_VOCABULARY.update(EXPRESSION_LIST_BRACE)
 
 #: ``bind chan_p *;``. ``*`` is a wildcard here and multiplication in an
 #: expression, so it is word-class in this vocabulary -- the same split
@@ -299,11 +307,26 @@ def _statement(ctx: Any, node: Any, vocabulary: Any, separate: Any,
         if sites is None:
             return _reproduce(ctx, node)
     stops = _column_stops(ctx, node)
+    # No `S-17` guard here, deliberately, and it was added and taken out
+    # again. A field declaration the author wrapped has been *joined* since
+    # `P3-4` -- `T-23`'s `TestWrappingIsNotUndone` is the pin -- because a
+    # declaration is short and joining one produces a line that fits.
+    # `procedural._statement` needs the guard because a wrapped *statement*
+    # is a call, and those join to 86-plus columns. Same-looking construct,
+    # opposite evidence.
+    wrap = wrap_for(ctx, node)
     emitted = emit_span(ctx, span[0], span[1], vocabulary,
                         separate=separate,
                         mark_at=stops,
                         sites_at=sites,
-                        break_at=_break_after_assign(ctx, span))
+                        break_at=_break_after_assign(ctx, span),
+                        # `S-16`: an initializer holding a call may break its
+                        # argument list rather than only after the `=`. Both
+                        # are offered and the engine picks -- the wrap is a
+                        # group of its own, so it breaks only if the line
+                        # still does not fit once the `=` break has been
+                        # taken.
+                        wrap=wrap)
     return emitted if emitted is not None else _reproduce(ctx, node)
 
 

@@ -57,7 +57,8 @@ everywhere: ``*`` is multiplication in an expression and a wildcard in
 The effect is that this machinery cannot mis-format a construct it was not
 written for -- it can only decline, which leaves your text as you wrote it.
 A header holding a template *parameter list* -- ``struct s <type T> { … }``,
-the declaring side -- is declined today for exactly this reason.
+the declaring side -- was declined for exactly this reason until ``S-7``
+named its tokens.
 
 Second, a style can set any gap to zero, and that must never change what a
 file *means*. It cannot: a lexical floor sits under every computed gap.
@@ -103,16 +104,26 @@ column you actually reached and flattens a near-miss -- see :doc:`style`.
 
 What a statement does not get:
 
-* **``if``/``else``** is left exactly as written, because ``docs/style.rst``
-  does not say where ``} else {`` goes and five corpus instances in three
-  files cannot decide it.
-* **Loops.** ``repeat (i : n) { … }`` carries a colon that is a fifth reading
-  of a character the style already splits four ways, and
-  ``repeat { … } while (e);`` puts its block in the *middle* of the statement,
-  which the block layout cannot express at all.
-* **A statement you wrapped across lines**, for the reason a wrapped prototype
-  is left alone: formatting it means joining it, and six of the corpus's seven
-  wrapped calls join to between 86 and 108 columns.
+* **A branch that is not braced.** ``if (x) y;`` is legal PSS, and laying it
+  out needs a decision :doc:`style` has not made -- while adding the braces
+  that would settle it is a change to the token stream, which ``pssfmt`` does
+  not make. The whole statement is reproduced. Two in the corpus, and both
+  hide a ``break`` or a ``continue`` that stays unformatted with them.
+* **``repeat { … } while (e);``** puts its block in the **middle** of the
+  statement. The block layout can now express that -- it grew a tail for
+  ``else`` -- but the tail would have to be a whole statement rather than a
+  keyword and a layout, and the corpus contains none of these.
+* **A statement you wrapped that has nowhere to break.** One holding a list
+  is joined and re-broken; one holding no list, or two, and whose joined form
+  is past the width, keeps the line you gave it.
+
+``if``/``else`` and the loops used to head that list and no longer do.
+``} else {`` is decided -- cuddled, argued from four guides rather than
+measured, since five corpus instances in three files cannot settle it -- and
+``foreach (i : list)``, ``repeat (i : 4)``, ``repeat (4)`` and ``while (x)``
+are laid out with it. The same two answers unblocked the same two constructs
+in constraints and in activities, which is what makes them language rules
+rather than three separate calls.
 
 **``exec`` bodies.** ``exec body { … }``, ``exec init_up { … }`` and the rest
 -- 28 in the corpus across 18 files, holding 109 statements that were
@@ -134,16 +145,21 @@ the same sites a *call* uses, which is a measurement rather than a shortcut --
 the survey counts a name followed by ``(`` without caring which it is looking
 at, so there is one number here and not two.
 
-Two things a prototype does not get, both refusals rather than gaps:
+One thing a prototype does not get, and it is a refusal rather than a gap:
 
-* **A prototype you wrapped across lines is left exactly as written.**
-  Formatting it means joining it onto one line, and the ones people wrap are
-  wrapped because the joined form is past the width. Three of the corpus's
-  five are hand-aligned parameter tables. Laying those out properly needs a
-  break policy for a parameter list, which is not yet decided -- so the
-  header is reproduced and *the body inside it is still formatted*.
-* **Varargs** (``function void f(int... args)``) declines, because the corpus
-  contains one and one instance cannot decide a spacing rule.
+* **A prototype you wrapped is joined and re-broken**, which is what changed:
+  it used to be reproduced, because joining it was all the formatter could do
+  and the ones people wrap join to 90-plus columns. The parameter list has a
+  break policy now. Three of the corpus's five are hand-aligned parameter
+  tables and lose their columns -- the accepted cost, and ``// pssfmt off``
+  is what keeps one.
+
+Varargs used to be the second item in that list and is not. ``function void
+f(int... args)`` declined because the corpus contains one instance and one
+instance cannot decide a spacing rule -- and that is still true, so the rule
+is **argued** rather than measured: tight against the type, one space before
+the name, from C's ``printf(const char *fmt, ...)``. The number is the same
+one a comma would have given; where it comes from is not.
 
 **Enums.** ``enum op_mode_e { FAST, SLOW }`` and::
 
@@ -193,12 +209,21 @@ gaps right, from one rule, because ``unary_op`` and ``add_sub_op`` are
 different rules in the PSS grammar. The same applies to ``(``, which is a
 call, a grouping and a cast in the same expression.
 
-What is declined: ``**`` (65 instances, but all one author's, unanimously
-tight, against a general rule that says spaced -- one voice cannot decide
-it); ``>>`` (spelled as two ``>`` tokens that must touch inside an operator
-that must not, which per-token spacing cannot express); and aggregate
-literals, 2 instances in 2 files, whose brace would have to borrow a site
-measured on 725 declaration braces.
+What is declined: a **map** literal (``{"a": 1}``) and a **struct** literal
+(``{.x = 1}``), each needing a decision the corpus contains no instance of.
+Value lists (``{1, 2, 3}``) are formatted -- see the list brace in
+:doc:`style`.
+
+``**`` and ``>>`` used to be on that list and are not. ``**`` is the one rule
+in the tool that depends on the *shape* of its operands rather than on token
+adjacency -- ``x**2`` but ``base ** f(n)``, which is Black's rule and is
+argued rather than measured, since all 65 corpus instances are one author's
+and all are already tight. ``>>`` is spelled as two ``>``
+tokens that must touch inside an operator that must not, which one spacing
+rule cannot express -- and two can, one per token. The same reading brought in the
+ternary ``p ? 1 : 2``, which the corpus does not contain at all and which is
+therefore argued from the general binary-operator rule rather than measured.
+:doc:`style` states both.
 
 **Target-template ``exec`` bodies are copied, not formatted.** ``exec body C =
 """…"""`` carries C, or SystemVerilog, or whatever the target consumes. Its
@@ -249,13 +274,18 @@ because that is what 31 of the 32 in the corpus do, 21 of them with exactly
 one item. A formatter that collapsed them would be rewriting a deliberate
 convention rather than tidying anything.
 
-The seven items left alone are ``if``/``else``, ``foreach``, ``unique``,
-``dist``, an implication whose right-hand side is a braced block, and two
-expressions already covered above. Each has **one instance in the corpus or
-none**, and each needs a decision the corpus has not made -- where ``else``
-goes relative to its brace, what the iterator colon in ``foreach (i : list)``
-looks like, whether a ``{a, b}`` list brace follows the rule measured on 725
-declaration bodies. One example cannot settle any of those.
+``if``/``else``, ``foreach`` and ``unique`` were three of the seven items
+left alone, and are not any more. Each had one instance in the corpus and each
+needed a decision the corpus could not make -- where ``else`` goes relative to
+its brace, what the iterator colon in ``foreach (i : list)`` looks like,
+whether a ``{a, b}`` list brace follows the rule measured on 725 declaration
+bodies. All three are answered in :doc:`style`, by argument and labelled as
+such, and the same three answers unblocked the same constructs in procedural
+code and in activities.
+
+What is still left alone: ``dist`` (blocked upstream -- it does not parse),
+an implication whose right-hand side is a braced block, an ``if`` whose branch
+is not braced, and two expressions covered above.
 
 **Activities.** ``do mem_copy_a;``, ``parallel { … }``, ``repeat (4) { … }``,
 ``bind fill_copy.blk copy.src;`` -- the traversals an activity is mostly made
@@ -270,12 +300,53 @@ shapes ``pssfmt`` already had: a block is a declaration body with a different
 word in front of it, and a traversal is a scoped name and a semicolon. Not one
 new spacing rule was needed for any of it.
 
+Labels are laid out too -- ``a : do step;`` -- and that one is worth naming
+separately, because nothing was measured for it. Both human voices in the
+corpus space a label colon and the code generator does not, so the rule was
+published and then deliberately *not applied* for want of standing to
+overrule one voice. It is applied now; see :doc:`style`.
+
 Left alone, each for a reason on the same page as the others: inline
-constraints (``do step with { … }``), labels (``a: do step;``), guarded and
-weighted ``select`` branches, ``if``/``else``, ``foreach``, ``match``,
-``replicate``, and the ``monitor`` operators. Every one is a construct the
+constraints (``do step with { … }``), guarded and weighted ``select``
+branches, ``if``/``else``, ``foreach``, ``match``, ``replicate``, and the
+``monitor`` operators. Every one is a construct the
 corpus contains once, or contains only in a single file -- and a single file
 is one author's habit rather than a convention.
+
+**Blank lines at the edges of a block are deferred too**, and this one was
+decided, built, measured and then put back. The proposal was to strip a blank
+line written immediately after ``{`` or immediately before ``}`` -- which
+``gofmt``, ``rustfmt`` and ``black`` all do, and which ``clang-format``'s
+``MaxEmptyLinesToKeep`` deliberately does not apply at a block boundary. The
+corpus disagrees, and it disagrees in the way this project treats as
+strongest: **two independent human voices** write a blank line after an
+opening brace -- 37 times in the hand-written voice and 4 in the third-party
+standard library, across 41 files -- while the code generator writes none.
+The other half is uncontested: 5 blank lines before a closing brace, all in
+one voice. Implementing it would have reformatted 33 files against that.
+``tools/style_survey.py`` reports both counts, so the deferral rests on a
+figure that can be re-checked rather than on one recorded once.
+So blank lines are clamped to ``max_blank_lines`` wherever they are, including
+against a brace, and the rule waits for a reason better than four style
+guides.
+
+**Guarded and weighted ``select`` branches are deferred, not pending.** The
+distinction is worth drawing, because the rest of that list is work not yet
+started and this one is work deliberately not started::
+
+    select {
+        (mode == FAST) [3]: do fast_step;
+                       [1]: do slow_step;
+    }
+
+That is the corpus's only instance, and it carries *four* undecided
+questions at once -- the guard's parens, the weight's bracket, the branch
+colon, and the hand-aligned colon column those two branches are written in --
+and unlike every other construct
+here there is no neighbouring rule to borrow from: a weight bracket is a
+construct PSS invented, so the measured bracket rules have nothing to say
+about it. It waits on a second independent file, on the same terms as
+``pool [4]``.
 
 **Extensions.** ``extend component spi_c { … }``. A body like any other, and
 mentioned separately only because of what it was hiding. 31 of the corpus's 92
@@ -292,6 +363,14 @@ exactly as written, and one that was not is set flush left. This is what makes
 the field rules safe to turn on -- without it they would flatten every
 hand-built table in the test corpus, which is a large, entirely plausible
 diff that destroys deliberate work.
+
+A third detail is a decision *not* to build something. ``infer`` judges a run
+of lines as a whole rather than judging each column in it separately, and
+judging them separately was measured before being written: it changes not one
+of the 92 corpus files. The mixed case it would rescue -- a block whose
+comments line up and whose ``=`` does not -- occurs three times in 365 runs,
+and in all three the two answers agree. Splitting a group into runs of lines
+sharing a first column, which landed earlier, had already covered it.
 
 Two details are worth stating because they are decisions rather than
 accidents. ``infer`` *reproduces* an aligned block rather than re-aligning it
@@ -403,6 +482,14 @@ Not built yet
 
    * - Piece
      - What is missing
+   * - **Line breaking**
+     - Built. A bracketed list that does not fit breaks -- all or nothing by
+       default, greedily with ``pack_arguments = "bin_pack"`` -- and wrapped
+       prototypes, statements and template parameter declarations are joined
+       and re-broken from their content rather than reproduced. Measured on
+       the corpus: **lines over ``print_width`` go from 123 to 51**, and
+       almost all of the 51 that remain are hand-built trailing-comment
+       tables, which nothing can move off their lines.
    * - **Style rules**
      - Fewer than there were. Declarations, their bodies and their headers
        are formatted, as are ``extend`` blocks, ``import`` statements, field
@@ -410,11 +497,13 @@ Not built yet
        activities, template arguments, functions -- body, header, parameter
        list and the statements inside -- and native ``exec`` bodies;
        ``if``/``else`` and the loop statements, coverage, ``compile if``,
-       annotations, ``monitor`` blocks and template *parameter* declarations
-       are not, and are reproduced exactly until they are. Of what remains,
+       annotations and ``monitor`` blocks are not, and are reproduced exactly
+       until they are. Of what remains,
        most is either one construct in one corpus file or a rule deliberately
        waiting on evidence -- ``pool [4]`` is the clearest, where the corpus
-       and the measured bracket rule disagree and neither has been overruled.
+       and the measured bracket rule disagree and neither has been overruled,
+       and **guarded and weighted ``select`` branches** are the other, deferred
+       explicitly rather than merely un-started (see below).
        Expressions *inside* those constructs are reproduced with them: a rule
        cannot lay out a node whose parent has no rule. That was a large caveat
        and is now a small one -- it accounted for 13 of the corpus's 137
