@@ -20,12 +20,20 @@
 #   held by accident. Now that it is a resolved runtime dependency it is in
 #   every environment, and the promise needs a job that deliberately removes it
 #   -- `layout-without-the-parser`.
+#
+# RELEASES (2026-09-28). A `v*` tag is the only thing that publishes; a push to
+# a branch builds and tests but never reaches PyPI. The `gate`, `build` and
+# `publish` jobs below follow templates/ci.github.yml in dvkit/forgejo-ops,
+# adapted to where this project keeps its version (`_pkg_version` in
+# src/pssfmt/__version__.py). Until this landed, 0.1.0 was uploaded by hand
+# and the v0.2.0 tag published nothing at all.
 
 name: CI
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 concurrency:
@@ -33,6 +41,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------- gate ----
+  gate:
+    # Release master switch: https://dvkit.org/.well-known/release-authority.json,
+    # generated from sync-policy.toml, decides which forge publishes this repo.
+    # A SEPARATE JOB because `if:` on a job cannot reference a step in its own
+    # job, so `publish` consumes the answer through needs.gate.outputs.
+    #
+    # Fails CLOSED on a tag when the switch is unreachable: a release blocked
+    # by an outage is recoverable, a version published from two forges is not.
+    name: Release authority
+    runs-on: ubuntu-latest
+    outputs:
+      authority: ${{ steps.resolve.outputs.authority }}
+    steps:
+      - id: resolve
+        # The python is ONE LINE on purpose: a multi-line `python3 -c` body has
+        # to start at column 0, which terminates the YAML block scalar.
+        #
+        # CASE-FOLDED: GitHub calls this repo `PSSTools/pssfmt`, the switch's
+        # keys are lowercase, and an exact-match miss would fall through to
+        # d["default"] silently.
+        run: |
+          url=https://dvkit.org/.well-known/release-authority.json
+          if ! body=$(curl -fsS --max-time 10 "$url"); then
+            case "$GITHUB_REF" in
+              refs/tags/v*)
+                echo "::error::release-authority switch unreachable; refusing to publish"
+                exit 1 ;;
+              *)
+                echo "authority=none" >> "$GITHUB_OUTPUT"
+                echo "switch unreachable on a non-tag ref; nothing to release"
+                exit 0 ;;
+            esac
+          fi
+          auth=$(printf '%s' "$body" | python3 -c 'import json,os,sys; d=json.load(sys.stdin); r=os.environ["GITHUB_REPOSITORY"].lower(); print(d["repos"].get(r) or d["orgs"].get(r.split("/")[0]) or d["default"])')
+          echo "release authority for $GITHUB_REPOSITORY: $auth"
+          echo "authority=$auth" >> "$GITHUB_OUTPUT"
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -165,6 +211,110 @@ jobs:
         # but D-17 -- every PSS block in the docs is formatted and checked --
         # never runs anywhere in CI.
         run: pytest -m slow -q
+
+  # --------------------------------------------------------------- build ----
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stamp the build version
+        # Tag builds keep the clean number. Everything else gets a PEP 440
+        # local version segment -- 0.3.0.dev<run>+gh.g<sha> -- which PyPI
+        # rejects outright, so a CI artifact can never become a release.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              echo "tag build -- leaving the version clean"
+              ;;
+            *)
+              stamp=".dev${GITHUB_RUN_ID}+gh.g$(git rev-parse --short=7 HEAD)"
+              echo "stamping $stamp"
+              sed -i 's/^_pkg_version = "\([^"]*\)"$/_pkg_version = "\1'"$stamp"'"/' src/pssfmt/__version__.py
+              ;;
+          esac
+          grep -n '^_pkg_version' src/pssfmt/__version__.py
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          rm -rf dist/
+          python -m build
+          twine check dist/*
+          ls -la dist/
+
+      - name: Smoke-test the built wheel
+        # The suites above test the source tree; this proves the wheel itself
+        # installs, imports and carries a working console script.
+        run: |
+          python -m venv /tmp/wheelenv
+          /tmp/wheelenv/bin/pip install -q "$(ls dist/*.whl)"
+          /tmp/wheelenv/bin/pssfmt --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-pssfmt
+          path: dist/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------- publish ----
+  publish:
+    name: Publish to PyPI
+    # A TAG, and the switch naming THIS forge. Skips -- does not fail -- when
+    # the switch names Forgejo. `needs` lists every test job: nothing ships
+    # that did not pass the full suite on every Python in the matrix.
+    if: startsWith(github.ref, 'refs/tags/v') && needs.gate.outputs.authority == 'github'
+    needs: [gate, test, layout-without-the-parser, boundaries, docs, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-pssfmt
+          path: dist
+
+      - name: Check the tag IS the version
+        # A PyPI version can be yanked but never reused, so a tag that
+        # disagrees with the source is caught here, before upload. Asserts
+        # twice: the SOURCE agrees with the tag, and every BUILT ARTIFACT
+        # agrees with the source.
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          base=$(python3 -c "import re; print(re.search(r'^_pkg_version = \"([^\"]*)\"$', open('src/pssfmt/__version__.py').read(), re.M).group(1))")
+          echo "tag=$tag  source=$base"
+          if [ "$tag" != "$base" ]; then
+            echo "::error::tag v$tag does not match version $base in src/pssfmt/__version__.py"
+            exit 1
+          fi
+          for f in dist/*; do
+            case "$(basename "$f")" in
+              pssfmt-${base}-*.whl|pssfmt-${base}.tar.gz) ;;
+              *) echo "::error::artifact $(basename "$f") is not version ${base}"; exit 1 ;;
+            esac
+          done
+          echo "OK: tag, source version and every artifact agree on ${base}"
+
+      - name: Publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$TWINE_PASSWORD" ]; then
+            echo "::error::PYPI_API_TOKEN is not visible to this repository"
+            exit 1
+          fi
+          pip install --upgrade twine
+          twine check dist/*
+          twine upload --non-interactive --skip-existing dist/*
 
   # TODO (P5-2, T-8): whitespace-mutation invariance over the corpus. The
   #   prerequisite that blocked T-5 is gone, so this is now blocked only on the

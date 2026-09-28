@@ -23,6 +23,14 @@
 # .forgejo/workflows/ still falls back to .github/. pull_publish = "block" and
 # the publish_risk() preflight are what hold that side; this file is not a
 # substitute for either.
+#
+# RELEASES (2026-09-28). `gate` and `publish-pypi` below are the Forgejo half
+# of the pair in .github/workflows/ci.yml: the same release-authority switch,
+# compared against 'forgejo' instead of 'github'. Today the switch names GitHub
+# for this repo, so publish-pypi SKIPS here on every tag. It exists so that
+# moving pssfmt's releases to Forgejo is a sync-policy.toml edit and not a
+# workflow edit. It builds inside the publish job, on a tag only, so a branch
+# push still does no network build here (see `check` below).
 name: CI
 
 on:
@@ -33,6 +41,33 @@ on:
   workflow_dispatch:
 
 jobs:
+  gate:
+    # Release master switch -- see .github/workflows/ci.yml for the reasoning.
+    # One-line python on purpose (a multi-line body breaks the YAML block
+    # scalar); case-folded because the switch's keys are lowercase.
+    name: Release authority
+    runs-on: ubuntu-latest
+    outputs:
+      authority: ${{ steps.resolve.outputs.authority }}
+    steps:
+    - id: resolve
+      run: |
+        url=https://dvkit.org/.well-known/release-authority.json
+        if ! body=$(curl -fsS --max-time 10 "$url"); then
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              echo "::error::release-authority switch unreachable; refusing to publish"
+              exit 1 ;;
+            *)
+              echo "authority=none" >> "$GITHUB_OUTPUT"
+              echo "switch unreachable on a non-tag ref; nothing to release"
+              exit 0 ;;
+          esac
+        fi
+        auth=$(printf '%s' "$body" | python3 -c 'import json,os,sys; d=json.load(sys.stdin); r=os.environ["GITHUB_REPOSITORY"].lower(); print(d["repos"].get(r) or d["orgs"].get(r.split("/")[0]) or d["default"])')
+        echo "release authority for $GITHUB_REPOSITORY: $auth"
+        echo "authority=$auth" >> "$GITHUB_OUTPUT"
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -118,3 +153,63 @@ jobs:
         else
           echo "no packaging metadata; nothing to check"
         fi
+
+  publish-pypi:
+    # A TAG, and the switch naming THIS forge. Skips -- does not fail -- when
+    # the switch names GitHub. Runner constraints: python3 is 3.10 with a pip
+    # that predates PEP 660, and no third-party actions -- so venvs and plain
+    # twine.
+    if: startsWith(github.ref, 'refs/tags/v') && needs.gate.outputs.authority == 'forgejo'
+    needs: [gate, check]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build sdist and wheel
+      run: |
+        python3 -m venv /tmp/buildenv
+        /tmp/buildenv/bin/pip install -q --upgrade pip build twine
+        rm -rf dist/
+        /tmp/buildenv/bin/python -m build .
+        /tmp/buildenv/bin/twine check dist/*
+        ls -la dist/
+
+    - name: Test against the built wheel
+      # The corpus-free suites only: the corpus sweeps fail (not skip) without
+      # a pss-corpus checkout, and the full matrix is the GitHub side's job.
+      # This proves the wheel installs, its console script runs, and the
+      # layout engine works from it.
+      run: |
+        python3 -m venv /tmp/testenv
+        /tmp/testenv/bin/pip install -q --upgrade pip
+        /tmp/testenv/bin/pip install -q "pytest>=8.0" "$(ls dist/*.whl)"
+        /tmp/testenv/bin/pssfmt --version
+        /tmp/testenv/bin/python -m pytest -q -m "layout or unit or trivia"
+
+    - name: Check the tag IS the version
+      run: |
+        tag="${GITHUB_REF#refs/tags/v}"
+        base=$(python3 -c "import re; print(re.search(r'^_pkg_version = \"([^\"]*)\"$', open('src/pssfmt/__version__.py').read(), re.M).group(1))")
+        echo "tag=$tag  source=$base"
+        if [ "$tag" != "$base" ]; then
+          echo "::error::tag v$tag does not match version $base in src/pssfmt/__version__.py"
+          exit 1
+        fi
+        for f in dist/*; do
+          case "$(basename "$f")" in
+            pssfmt-${base}-*.whl|pssfmt-${base}.tar.gz) ;;
+            *) echo "::error::artifact $(basename "$f") is not version ${base}"; exit 1 ;;
+          esac
+        done
+        echo "OK: tag, source version and every artifact agree on ${base}"
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        if [ -z "$TWINE_PASSWORD" ]; then
+          echo "::error::PYPI_API_TOKEN is not visible to this repository"
+          exit 1
+        fi
+        /tmp/buildenv/bin/twine upload --non-interactive --skip-existing dist/*
