@@ -6,7 +6,11 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
-## Unreleased
+## 0.3.0 — 2026-09-28
+
+There is no 0.2.0 on PyPI. A `v0.2.0` tag exists, but nothing was published
+from it; everything since 0.1.0 is in this release. From this release on, a
+`v*` tag publishes to PyPI from CI.
 
 ### Changed — the style now decides twenty things it used to leave alone
 
@@ -130,6 +134,15 @@ measurement rather than left as absences:
   under `require` a dropped one does. One lost from inside a string fails
   either way, and the output must still parse at least as well as the input
   did.
+
+### Fixed
+
+- **A comment after an opening brace no longer makes the file decline.**
+  `package p { // note` — or any `component`, `struct`, `enum`, `exec`,
+  `activity` or other braced body with a same-line comment after its `{` —
+  used to lose that comment during layout. The fail-safe caught it every
+  time, so no comment was ever lost: the file was left unformatted and
+  `pssfmt` exited 2 calling it a bug. It is now formatted, comment kept.
 
 ## 0.1.0 — first public release
 
