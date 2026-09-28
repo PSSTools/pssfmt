@@ -83,7 +83,10 @@ def test_the_corpus_actually_exercises_both_directions():
 
     Every test above passes trivially on a file with no optional semicolon in
     it and no declaration to give one to, and most of the corpus is the first
-    kind. The figures are the ones ``docs/style.rst`` quotes.
+    kind. ``docs/style.rst`` quotes 27, measured on the 92-file corpus; the
+    four files it counts still drop exactly those 27. The other 21 are the
+    LRM habit of ``};`` in five ``lrm31/`` files pss-corpus added later
+    (``ex036_037``, ``ex247_248``, ``ex272`` and both ``ex289`` variants).
     """
     dropped = added = 0
     for path in FILES:
@@ -91,5 +94,5 @@ def test_the_corpus_actually_exercises_both_directions():
         base = fmt(source, PRESERVE).count(";")
         dropped += base - fmt(source, OMIT).count(";")
         added += fmt(source, REQUIRE).count(";") - base
-    assert dropped == 27, "the corpus drops %d semicolons, not 27" % dropped
+    assert dropped == 48, "the corpus drops %d semicolons, not 48" % dropped
     assert added > 500, "only %d semicolons added across the corpus" % added

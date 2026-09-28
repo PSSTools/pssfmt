@@ -233,6 +233,29 @@ class TestComments:
         """
         roundtrips("package p {\n    struct s {\n        int x;\n    }  // end s\n}\n")
 
+    def test_a_trailing_comment_after_the_opening_brace_survives(self):
+        """The header's own line, which no member and no header owns.
+
+        Rule 1 attaches ``// note`` to the ``{`` itself. The header stops at
+        the brace and the first member starts on the next line, so for a
+        while this comment fell between them and was dropped -- found by
+        ``lrm31/ex247_248_extensions_in_packages.pss``. The member is on the
+        brace's line here so that the case has to be *formatted*, not merely
+        declined and passed through.
+        """
+        assert fmt("package p { // note\n    buffer b { rand bit[8] x; }\n}\n") \
+            == ("package p { // note\n"
+                "    buffer b {\n        rand bit[8] x;\n    }\n"
+                "}\n")
+
+    @pytest.mark.parametrize("src", [
+        "component c { // note\n}\n",
+        "component c { /* note */\n    action a {}\n}\n",
+        "enum e { // note\n    A,\n    B\n}\n",
+    ], ids=["empty body", "block comment", "enum"])
+    def test_every_opening_brace_keeps_its_trailing_comment(self, src):
+        roundtrips(src)
+
     def test_a_comment_alone_before_the_closing_brace_survives(self):
         """Section 3.1 rule 4: dangling, owned by nobody, easy to drop."""
         roundtrips("package p {\n    struct s {}\n\n    // TODO more\n}\n")

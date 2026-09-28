@@ -1471,9 +1471,19 @@ def _block(ctx: Any, node: Any, construct: Construct,
     if members is None:
         return _reproduce(ctx, node)
 
+    # A same-line comment after ``{`` -- ``package p { // note`` -- is trailing
+    # trivia on the brace itself (rule 1), so no member owns it and neither
+    # does the header, which ends *at* the brace. Until this was emitted here
+    # it was emitted nowhere, and the fail-safe declined every such file.
+    opener = _trailing(ctx, body.children[open_at].token_index)
+    if opener is _BAIL:
+        return _reproduce(ctx, node)
+
     header = _header(ctx, node, body.children[open_at], vocabulary, sites,
                      separate, wrap)
     parts: List[Layout] = [header]
+    if opener is not None:
+        parts.append(opener)
     if members:
         # A blank line before the closing brace is **kept**, clamped like any
         # other run. `S-4` proposed stripping it, and the blank line after
@@ -1487,6 +1497,10 @@ def _block(ctx: Any, node: Any, construct: Construct,
         parts.append(indent(_stack(ctx, members, lead_break=True),
                             ctx.style.indent_for(construct)))
         parts.append(hardline(min(blanks, ctx.style.max_blank_lines)))
+    elif opener is not None:
+        # ``{ // note`` then ``}``: the comment ends the line, so the brace
+        # cannot follow it on the same one.
+        parts.append(hardline(0))
     parts.append(text("}"))
     if tail is not None:
         parts.append(tail)

@@ -226,8 +226,22 @@ class TestSpans:
         # that produced them while the file goes on copying the same other
         # constructs it always did. A construct leaving the copied set is not
         # the same as a *line* leaving it.
-        assert (total, files) == (309, 36), (
-            "%d lines across %d files report copied text, expected 309/36"
+        #
+        # 309/36 -> 287/35 with the pssparser that fixed `U-8e`, and none of
+        # it is pssfmt. Measured both ways against the same corpus, the whole
+        # delta is two files; the new `lrm31/` files copy nothing:
+        #
+        #     lexical/comments_and_strings.pss  29 -> 11  (now parses)
+        #     pathological/unclosed_comment.pss  4 -> 0
+        #
+        # The second is a *fall*, so it was looked at. The lexer now ends an
+        # unclosed `/*` at EOF as one comment token (pssparser A6) instead of
+        # error tokens, so no node is an error node, the component rule
+        # reproduces its own unbraced body, and those lines are attributed to
+        # `component_declaration`. Still copied, still byte-identical; the
+        # attribution is what moved.
+        assert (total, files) == (287, 35), (
+            "%d lines across %d files report copied text, expected 287/35"
             % (total, files))
 
     def test_a_rule_is_named_for_every_line_or_verbatim_is(self):

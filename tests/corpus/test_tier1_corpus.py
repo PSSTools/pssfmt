@@ -334,6 +334,24 @@ REFORMATTED = {
     "pss31/annotations.pss",
     "pss31/behavioral_coverage.pss",
     "pss31/templates_and_activity.pss",
+    # New ``lrm31/`` files (pss-corpus ``744c589``..``73d1592``), and like
+    # ``pss31/`` above nothing about the rules changed to put them here. They
+    # are LRM examples transcribed at 2-space indentation with one-line
+    # bodies, so what moves is the kinds already recorded: re-indentation to
+    # 4, ``{ }`` -> ``{}``, one-line bodies opened, and the ``;`` after a
+    # declaration's ``}`` dropped (``optional_semicolon`` default).
+    #
+    # ``ex247_248`` is also the file that found the opening-brace comment:
+    # ``package mem_defs_pkg { // reusable definitions`` tripped the fail-safe
+    # until ``_block`` learned to emit the brace's own trailing comment.
+    "lrm31/ex036_037_contextual_typing.pss",
+    "lrm31/ex247_248_extensions_in_packages.pss",
+    "lrm31/ex254_type_and_instance_overrides.pss",
+    "lrm31/ex259_273_package_aliases.pss",
+    "lrm31/ex272_enum_item_references.pss",
+    "lrm31/ex284_super.pss",
+    "lrm31/ex289_reactive_control_flow.pss",
+    "lrm31/ex289_reactive_control_flow_component_static.pss",
 }
 
 

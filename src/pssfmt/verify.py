@@ -29,6 +29,13 @@ zero errors, so a spacing rule that turned ``/*`` into ``/ *`` would comment
 out the rest of the file and pass a lexer-based check cleanly. The parser sees
 it; the lexer does not.
 
+pssparser has since changed the premise (its lexer note A6): an unclosed
+``/*`` is now one comment token running to EOF, so the ``/ *`` hazard is gone
+-- and ``num_syntax_errors`` no longer counts it either, because the
+"unterminated block comment" diagnostic moved to pssparser's AST builder.
+Nothing here is weakened by that: the comment is one token, token equivalence
+compares its text, and a formatter cannot split it.
+
 Slightly stricter than section 3.5
 ----------------------------------
 Section 3.5 says the *default-channel* token sequence must match. This module

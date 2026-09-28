@@ -83,9 +83,9 @@ BROKEN_BUCKETS = broken_buckets()
 #: the digit portion of every ``BASED_*_LITERAL`` to any alphanumeric/underscore
 #: run, so ``16'sH_FF`` lexes. Struck here and in pssparser's table together, as
 #: the strict xfail exists to force.
+#: ``lexical/comments_and_strings.pss`` left the same way when ``U-8e`` was
+#: **fixed**: the lexer gained LRM 4.7's ``\\ddd`` octal escape.
 KNOWN_UNPARSEABLE = {
-    "lexical/comments_and_strings.pss":
-        "U-8e: octal escape in a string literal (\"\\101\")",
     "lexical/operators.pss":
         "U-8b: `dist` constraints. This file also contains deliberately "
         "ungrammatical operator torture (`a = -b` in a constraint), so it may "

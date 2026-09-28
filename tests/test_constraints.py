@@ -339,8 +339,16 @@ def test_the_corpus_constraints_format(request):
                     formatted += 1
             stack.extend(reversed(node.children))
 
-    assert formatted + declined == 103, (formatted, declined)
-    assert declined == 5, declined
+    # 103 -> 133 and 5 -> 9 when pss-corpus added its `lrm31/` examples.
+    # Measured with the previous parser against the previous corpus as well,
+    # and every item of the delta is in a new file: 26 formatted, 4 declined.
+    # The four are new *vocabulary*, not a new kind of failure --
+    #
+    #     s == {.a = 2};              two struct literals (ex036_037)
+    #     domain_B in { prev.… }      a braced `in` set (ex170)
+    #     a > super.a;                `super` (ex284)
+    assert formatted + declined == 133, (formatted, declined)
+    assert declined == 9, declined
 
 
 class TestControlItems:
