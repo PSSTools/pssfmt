@@ -144,14 +144,14 @@ def _toml_loads(data: bytes, path: Path) -> Mapping[str, Any]:
     """Parse TOML, or explain precisely what is missing.
 
     ``tomllib`` is stdlib from 3.11 and ``tomli`` is the backport this package
-    declares for 3.9 and 3.10. If neither is importable the configuration file
+    declares for 3.10. If neither is importable the configuration file
     is *not* skipped: a file the user wrote and the tool cannot read must stop
     the run, because carrying on means formatting to a style nobody asked for
     while reporting success.
     """
     try:
         import tomllib as toml  # type: ignore[import-not-found]
-    except ModuleNotFoundError:  # pragma: no cover - 3.9/3.10 only
+    except ModuleNotFoundError:  # pragma: no cover - 3.10 only
         try:
             import tomli as toml  # type: ignore[no-redef]
         except ModuleNotFoundError:

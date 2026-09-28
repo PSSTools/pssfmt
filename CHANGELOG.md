@@ -12,6 +12,14 @@ There is no 0.2.0 on PyPI. A `v0.2.0` tag exists, but nothing was published
 from it; everything since 0.1.0 is in this release. From this release on, a
 `v*` tag publishes to PyPI from CI.
 
+### Changed — Python 3.10 or newer, pssparser 3.1.7 or newer
+
+`pssfmt` now requires **pssparser 3.1.7**, the first release that lexes LRM
+4.7's `\ddd` octal string escape and ends an unclosed `/*` at end of file as
+one comment token. pssparser publishes no Python 3.9 wheel after 3.1.3, so
+this release also **drops Python 3.9** (end of life since October 2025).
+On 3.9, `pip install pssfmt` keeps resolving 0.1.0.
+
 ### Changed — the style now decides twenty things it used to leave alone
 
 **Read this before upgrading a formatted codebase.** Every item below was a

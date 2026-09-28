@@ -9,7 +9,7 @@ Install
    $ pip install pssfmt
 
 That brings in ``pssparser``, which ``pssfmt`` calls on every file it reads.
-Python 3.9 or newer.
+Python 3.10 or newer.
 
 To build the formatter from a checkout instead -- because you are changing it,
 not using it -- see :ref:`from-source` at the end of this page.

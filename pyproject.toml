@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 name = "pssfmt"
 description = "A formatter for the Accellera Portable Test and Stimulus Standard (PSS)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
     { name = "Matthew Ballance", email = "matt.ballance@gmail.com" },
@@ -54,17 +54,24 @@ classifiers = [
 # ANTLR and a C++ toolchain. That is the better failure, and CI's matrix is
 # what keeps the supported set honest.
 #
+# **Raised to 3.1.7 on 2026-09-28, for 0.3.0.** 3.1.7 is the first release with
+# LRM 4.7's `\ddd` octal string escape (U-8e) and with an unclosed `/*` lexed
+# as one comment token to EOF (pssparser A6), and the test suite pins both. On
+# 3.1.6 and older, three tests fail and octal escapes make a file decline.
+# pssparser shipped its last cp39 wheel in 3.1.3, so this floor is also what
+# ended Python 3.9 support here -- requires-python above moved with it.
+#
 # Everything under src/pssfmt/layout/ works with no dependency at all, by
 # design (formatter.md section 10.3, enforced by T-9).
 #
 # `tomli` is the one entry, and it is a backport rather than a dependency:
 # `pssfmt.config` reads `.pssfmt` and `[tool.pssfmt]` as TOML, which is stdlib
-# `tomllib` from 3.11 and needs the backport on the two older interpreters
-# this package still supports. It is not imported unless a configuration file
+# `tomllib` from 3.11 and needs the backport on 3.10, the one older
+# interpreter this package still supports. It is not imported unless a configuration file
 # is actually found, and T-9's zero-dependency promise covers
 # `src/pssfmt/layout/`, which does not reach it.
 dependencies = [
-    "pssparser>=3.0.6",
+    "pssparser>=3.1.7",
     "tomli>=1.1.0; python_version < '3.11'",
 ]
 dynamic = ["version"]
