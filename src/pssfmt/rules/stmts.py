@@ -390,9 +390,10 @@ _FIELD_RULES = (
     # copy of this vocabulary, and the two would agree until the day one of
     # them was extended.
     #
-    # It carries no ``;`` -- the grammar makes the terminator a sibling
-    # ``procedural_stmt`` -- and needs none: ``decls._is_trailing_semicolon``
-    # merges it, which is the machinery ``P3-11`` found already in place.
+    # Owns its own ``;`` since pssparser's Q1 (the floor as of 3.2.0); before
+    # that the grammar made the terminator a sibling ``procedural_stmt`` and
+    # ``decls._is_trailing_semicolon`` merged it onto this line, which is the
+    # machinery ``P3-11`` found already in place.
     "procedural_data_declaration",
 )
 

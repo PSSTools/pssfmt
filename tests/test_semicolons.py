@@ -226,8 +226,9 @@ class TestRequiredSemicolonsStay:
     """
 
     def test_a_local_declaration_keeps_its_terminator(self):
-        """``procedural_data_declaration`` ends in an expression; the ``;``
-        is a sibling ``procedural_stmt`` and is not optional."""
+        """``procedural_data_declaration`` owns its own ``;`` since
+        pssparser's Q1 (the floor as of 3.2.0); it is the rule's real
+        terminator, not an empty-item alternative, so it is never dropped."""
         assert "int x = 1;" in fmt(
             "package p {\n    function void f() {\n        int x = 1;\n"
             "    }\n}\n")
@@ -408,5 +409,9 @@ class TestTheSelfTerminatingSet:
                      "enum_declaration", "extend_stmt", "data_declaration"):
             assert name in _SELF_TERMINATING, name
 
-    def test_the_rule_that_would_break_a_file_is_not(self):
-        assert "procedural_data_declaration" not in _SELF_TERMINATING
+    def test_the_rule_pssparser_q1_fixed_now_is(self):
+        """Until pssparser's Q1 (the floor as of 3.2.0), this rule's ``;``
+        was a sibling empty statement and adding it here would have deleted
+        a required terminator. Q1 moved the ``;`` inside the rule, so it is
+        self-terminating like any other declaration."""
+        assert "procedural_data_declaration" in _SELF_TERMINATING

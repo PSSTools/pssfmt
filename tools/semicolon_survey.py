@@ -41,9 +41,10 @@ member*, and nothing else:
         ``;`` after one of these can only be the body's empty-item
         alternative, so it carries no meaning and may go.
     not self-terminating
-        some alternative can end in an expression -- and
-        ``procedural_data_declaration`` is exactly that, which is why
-        ``int a[4] = {1, 2};`` is a sibling ``;`` that must stay.
+        some alternative can end in an expression, so a following ``;``
+        is a sibling that must stay rather than decoration that may go.
+        ``procedural_data_declaration`` was this shape before pssparser's
+        Q1 moved its ``;`` inside the rule (the floor as of 3.2.0).
 
 This program computes the first set as a least fixed point over the ANTLR
 grammar and prints it.  ``pssfmt.rules.decls._SELF_TERMINATING`` is its output,

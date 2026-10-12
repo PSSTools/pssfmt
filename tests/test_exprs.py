@@ -560,20 +560,26 @@ class TestWrappingIsNotUndone:
         assert fmt(field("8"), style) == "struct s {\n    int n=8;\n}\n"
 
 
-def test_the_corpus_expressions_format(request):
+def test_the_corpus_expressions_format():
     """The coverage number, kept honest by being computed rather than quoted.
 
     Most corpus expressions live in constraints and activities, which have no
     rule yet -- so this exercises the module directly rather than through
     ``format_source``, which would only reach the handful in field defaults.
     """
-    corpus = request.config.rootpath / "packages" / "pss-corpus"
-    if not corpus.is_dir():
-        pytest.skip("corpus not present")
+    # The gate's file list, not a glob of its own: `support` sweeps
+    # `curated/` (`_sweep_root`), so a new pss-corpus tier reaches this count
+    # only when the manifest says it should (C-24) and not by arriving. A
+    # missing corpus fails, as everywhere else (C-8).
+    from support import corpus_files
+    files = corpus_files()
+    if not files:
+        pytest.fail("no PSS corpus found; run `ivpm update` or set PSS_CORPUS "
+                    "(pss-corpus PLAN.md C-8)")
     from pssparser import cst as _cst
 
     formatted = declined = 0
-    for path in sorted(corpus.rglob("*.pss")):
+    for path in files:
         try:
             tree = _cst.parse(path.read_text(errors="replace"))
         except Exception:

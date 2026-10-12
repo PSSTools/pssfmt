@@ -253,7 +253,7 @@ class TestNoTokenIsEverLost:
         assert fmt(src) == src
 
 
-def test_the_corpus_constraints_format(request):
+def test_the_corpus_constraints_format():
     """The coverage number, computed rather than quoted.
 
     98 of the corpus's 103 constraint body items, measured on the *one-line
@@ -292,9 +292,15 @@ def test_the_corpus_constraints_format(request):
     corpus's only ``>>`` is in a constraint, so this count is where the right
     shift landing is visible over real code rather than over crafted input.
     """
-    corpus = request.config.rootpath / "packages" / "pss-corpus"
-    if not corpus.is_dir():
-        pytest.skip("corpus not present")
+    # The gate's file list, not a glob of its own: `support` sweeps
+    # `curated/` (`_sweep_root`), so a new pss-corpus tier reaches this count
+    # only when the manifest says it should (C-24) and not by arriving. A
+    # missing corpus fails, as everywhere else (C-8).
+    from support import corpus_files
+    files = corpus_files()
+    if not files:
+        pytest.fail("no PSS corpus found; run `ivpm update` or set PSS_CORPUS "
+                    "(pss-corpus PLAN.md C-8)")
     from pssparser import cst as _cst
 
     from pssfmt.rules import BuildContext
@@ -311,7 +317,7 @@ def test_the_corpus_constraints_format(request):
              "soft_constraint_item", "default_constraint",
              "default_disable_constraint", "dist_directive")
     formatted = declined = 0
-    for path in sorted(corpus.rglob("*.pss")):
+    for path in files:
         try:
             tree = _cst.parse(path.read_text(errors="replace"))
         except Exception:

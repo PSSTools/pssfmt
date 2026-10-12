@@ -153,18 +153,25 @@ class TestTheTrailingSemicolonMerge:
     """Existing machinery at a new call site, which is the thing this
     repository has twice found missing from exactly one place.
 
-    ``procedural_data_declaration`` does not own its terminator: the grammar
-    makes the ``;`` a *sibling* ``procedural_stmt``, so a body of three
-    declarations is six members, three of which are a bare semicolon. Laid out
-    as members in their own right they land on their own lines -- which is how
-    ``std_pkg.pss`` once came back with four bare semicolons in it.
+    At the time this was written, ``procedural_data_declaration`` did not own
+    its terminator: the grammar made the ``;`` a *sibling* ``procedural_stmt``,
+    so a body of three declarations was six members, three of which were a
+    bare semicolon. Laid out as members in their own right they land on their
+    own lines -- which is how ``std_pkg.pss`` once came back with four bare
+    semicolons in it.
 
-    ``decls._is_trailing_semicolon`` already merges them; it was written for
-    ``enum e {A, B};`` in ``P3-2`` and this is a second construct with the same
-    shape, reached for the first time here. 37 of the corpus's 300
-    ``procedural_stmt`` nodes across 17 files are one of these, so a
+    ``decls._is_trailing_semicolon`` already merged them; it was written for
+    ``enum e {A, B};`` in ``P3-2`` and this was a second construct with the
+    same shape, reached for the first time here. 37 of the corpus's 300
+    ``procedural_stmt`` nodes across 17 files were one of these, so a
     regression would be loud -- but only in files nobody was formatting until
-    now, which is why it is pinned rather than left to the corpus.
+    then, which is why it was pinned rather than left to the corpus.
+
+    pssparser's Q1 (the floor as of 3.2.0) has since moved the ``;`` inside
+    the rule, so the sibling bare-semicolon shape this class describes no
+    longer occurs for well-formed input; these tests stay pinned because the
+    merge machinery they exercise is still live for other self-terminating
+    rules, and still correct for this one wherever it fires.
     """
 
     def test_a_declaration_keeps_its_semicolon_on_its_line(self):

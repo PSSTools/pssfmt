@@ -616,15 +616,17 @@ def _tiles(spans: List[Tuple[int, int]], first: int, last: int) -> bool:
 #: ``tests/corpus/test_semicolon_grammar.py`` re-runs the derivation whenever
 #: the grammar is on disk and fails if the two have drifted.
 #:
-#: The exclusions are the point. ``procedural_data_declaration`` is absent
-#: because it ends in an *expression* -- the grammar makes its terminator a
-#: sibling ``procedural_stmt``, so ``int a[4] = {1, 2};`` is a lone ``;``
-#: after a ``}`` that must never be dropped, and it is indistinguishable from
-#: ``enum e {A, B};`` by position alone. ``constraint_declaration`` and the
-#: traversal statements are absent for a softer reason -- they reach a
-#: recursive knot the fixed point cannot prove -- and the corpus agrees with
-#: the caution: all four of its ``x with { … };`` and ``constraint c { … };``
-#: sites write the semicolon.
+#: The exclusions are the point. ``procedural_data_declaration`` *was*
+#: absent, on the theory that it ends in an *expression* and the grammar
+#: makes its terminator a sibling ``procedural_stmt``. pssparser's Q1 (the
+#: floor as of 3.2.0) moved the ``;`` inside the rule instead, so it is now
+#: self-terminating like any other declaration and the exclusion no longer
+#: holds -- see ``tests/corpus/test_semicolon_grammar.py`` for the derivation
+#: this was promoted from. ``constraint_declaration`` and the traversal
+#: statements are absent for a softer reason -- they reach a recursive knot
+#: the fixed point cannot prove -- and the corpus agrees with the caution:
+#: all four of its ``x with { … };`` and ``constraint c { … };`` sites write
+#: the semicolon.
 _SELF_TERMINATING = frozenset((
     "abstract_action_declaration",
     "abstract_monitor_declaration",
@@ -710,6 +712,7 @@ _SELF_TERMINATING = frozenset((
     "procedural_assignment_stmt",
     "procedural_break_stmt",
     "procedural_continue_stmt",
+    "procedural_data_declaration",
     "procedural_match_stmt",
     "procedural_return_stmt",
     "procedural_sequence_block_stmt",

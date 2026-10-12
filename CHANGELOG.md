@@ -6,6 +6,19 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
+## 0.4.0 — 2026-10-12
+
+### Changed — pssparser 3.2.0 or newer
+
+`pssfmt` now requires **pssparser 3.2.0**, the first release with Q1: a
+`procedural_data_declaration`'s `;` moved inside the rule instead of being
+left to a sibling empty statement. `_SELF_TERMINATING` in
+`rules/decls.py` now includes it, so `optional_semicolon = "omit"` drops a
+redundant second `;` after a local declaration (`int x = 1;;` → `int x = 1;`)
+the same way it already did for every other self-terminating declaration.
+Wheels cover the same cp310-cp314 matrix as 3.1.7, so no platform support
+changes with this raise.
+
 ## 0.3.0 — 2026-09-28
 
 There is no 0.2.0 on PyPI. A `v0.2.0` tag exists, but nothing was published
