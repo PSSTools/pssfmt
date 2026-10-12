@@ -6,7 +6,11 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
-## 0.4.0 — 2026-10-12
+## 0.4.1 — 2026-10-12
+
+There is no 0.4.0 on PyPI. A `v0.4.0` tag exists, but its publish job failed
+the version check (`src/pssfmt/__version__.py` was not bumped with it) before
+any upload; everything from that tag is in this release instead.
 
 ### Changed — pssparser 3.2.0 or newer
 
