@@ -14,7 +14,8 @@ things follow from that, and both are the reason for the rule:
 section 10.3 is explicit that a convention is not sufficient here.
 """
 
-from .align import ALIGN_MARK, AlignMode, GroupBoundary, align_text, strip_marks
+from .align import (ALIGN_MARK, PAD_MARK, AlignMode, GroupBoundary, align_text,
+                    column_stop, strip_marks)
 from .engine import MODE_BREAK, MODE_FLAT, propagate_breaks, render
 from .ir import (
     BREAK_PARENT,
@@ -83,9 +84,11 @@ __all__ = [
     "MODE_FLAT",
     # Alignment
     "ALIGN_MARK",
+    "PAD_MARK",
     "AlignMode",
     "GroupBoundary",
     "align_text",
+    "column_stop",
     "strip_marks",
     # Width
     "width_of",

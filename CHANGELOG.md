@@ -6,6 +6,27 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
+## 0.4.2 — 2026-10-19
+
+### Fixed — hand-aligned blocks declined as non-idempotent
+
+A block whose alignment padding pushed one line past `print_width` was left
+unformatted with `idempotence (output line N): formatting the output again
+changed it`. Line breaking measured the author's padding and broke that line;
+the break made the block ragged, `infer` flushed the padding away, and a
+second format found the line fitting and joined it back up. Line breaking now
+measures each column stop at the gap `flush-left` would leave
+(`layout.align.column_stop`), and the padding beyond that rides along at zero
+width for the alignment pass to keep or flush. It needed two or more marked
+lines, enough indentation to tip one over the width, and a line that could
+break.
+
+One visible consequence: under `infer`, an aligned block that overflows only
+because of its padding is now kept as the author wrote it rather than having
+a line broken to make room. That is what `infer` already did for such a block
+when the line could not break. `preserve` still measures the padding and
+breaks where it overflows.
+
 ## 0.4.1 — 2026-10-12
 
 There is no 0.4.0 on PyPI. A `v0.4.0` tag exists, but its publish job failed

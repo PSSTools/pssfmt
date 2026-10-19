@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 
 from pssfmt.layout import ALIGN_MARK as M
-from pssfmt.layout import AlignMode, GroupBoundary, align_text, strip_marks
+from pssfmt.layout import (PAD_MARK, AlignMode, GroupBoundary, align_text,
+                           column_stop, strip_marks, width_of)
 
 pytestmark = [pytest.mark.layout, pytest.mark.unit]
 
@@ -352,3 +353,53 @@ class TestHygiene:
         src = lines(f"a;{M} // x", "    continued", f"bbbbbb;{M} // y")
         got = align_text(src, mode=AlignMode.ALIGN, boundary=GroupBoundary.NONE).split("\n")
         assert got[1] == "    continued"
+
+
+class TestColumnStop:
+    """The author's padding reaches this pass without the engine measuring it.
+
+    Line breaking runs first, and :func:`column_stop` hands it only the gap
+    ``flush-left`` would leave. Measuring the padding instead broke lines that
+    only overflowed because of padding this pass then removed, and the second
+    format joined them back up.
+    """
+
+    def test_the_engine_sees_only_the_floor(self):
+        stop = column_stop(7, 1)
+        assert width_of(stop) == 1
+        assert strip_marks(stop) == " " * 7
+
+    def test_a_gap_below_the_floor_is_not_widened(self):
+        assert strip_marks(column_stop(1, 2)) == " "
+        assert width_of(column_stop(1, 2)) == 1
+
+    def test_measured_stops_carry_real_spaces(self):
+        assert column_stop(7, 1, measured=True) == M + " " * 7
+        assert width_of(column_stop(7, 1, measured=True)) == 7
+
+    @pytest.mark.parametrize("mode", list(AlignMode))
+    def test_padding_comes_out_as_spaces_in_every_mode(self, mode):
+        src = lines(
+            f"bit[8]  addr;{column_stop(5, 1)}// offset",
+            f"bit[32] data;{column_stop(5, 1)}// payload",
+            f"bit     valid;{column_stop(4, 1)}// strobe",
+        )
+        got = align_text(src, mode=mode)
+        assert M not in got and PAD_MARK not in got
+        if mode in (AlignMode.PRESERVE, AlignMode.INFER):
+            assert got == strip_marks(ALIGNED)
+
+    def test_infer_reads_padding_as_the_authors_columns(self):
+        src = lines(
+            f"bit[8]  addr;{column_stop(5, 1)}// offset",
+            f"bit[32] data;{column_stop(5, 1)}// payload",
+            f"bit     valid;{column_stop(4, 1)}// strobe",
+        )
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert len({l.index("//") for l in got}) == 1
+
+    def test_a_pad_character_away_from_a_stop_is_left_alone(self):
+        """Only the spacing after a mark is padding. A ``Verbatim`` payload
+        may hold the same character for reasons of its own."""
+        src = f"a{PAD_MARK}b;{column_stop(3, 1)}// c"
+        assert align_text(src, mode=AlignMode.PRESERVE) == f"a{PAD_MARK}b;   // c"

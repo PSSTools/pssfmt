@@ -216,7 +216,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ..layout import ALIGN_MARK, concat, text
+from ..layout import AlignMode, column_stop, concat, text
 from ..layout.ir import Layout, Verbatim
 from ..style import Construct, Site
 from .decls import _block, _braces, _reproduce, sites_before
@@ -790,7 +790,9 @@ def _after_the_colon(ctx: Any, colon_pos: int) -> Layout:
     gap = floor_gap(ctx.style.gap(Site.COLON_CASE_ITEM, None), left, right)
     original = original_gap(trivia, code, colon_pos + 1)
     if gap and original is not None:
-        return text(ALIGN_MARK + " " * max(gap, original))
+        return text(column_stop(
+            max(gap, original), gap,
+            measured=ctx.style.alignment is AlignMode.PRESERVE))
     return text(" " * gap)
 
 

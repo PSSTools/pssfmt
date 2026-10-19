@@ -85,7 +85,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .layout.align import ALIGN_MARK
+from .layout.align import ALIGN_MARK, strip_marks
 from .layout.engine import Decision, Visit, flat_width
 from .layout.ir import (Align, Concat, Fill, Group, IfBreak, Indent, Layout,
                         Text, Verbatim, children_of)
@@ -369,7 +369,7 @@ class Explanation:
             # its own machinery look like a bug is worse than no debug tree.
             if ALIGN_MARK in node.value:
                 return "Text <column stop> + %r%s" % (
-                    node.value.replace(ALIGN_MARK, ""), suffix)
+                    strip_marks(node.value), suffix)
             return "Text %r%s" % (node.value, suffix)
         if isinstance(node, Verbatim):
             return "Verbatim %d chars, %d lines%s" % (

@@ -19,6 +19,17 @@ mark is what makes ``preserve`` and ``infer`` implementable at all: by the time
 this pass runs, the source is gone, and the only record of what the author did
 is what the rule brought along.
 
+The author's spacing travels in two parts, and :func:`column_stop` builds
+both. The floor -- the gap ``flush-left`` would leave -- is real spaces, which
+the engine measures. Anything the author had beyond that is
+:data:`PAD_MARK`, one per column, which the engine measures as zero and this
+pass reads as a space. Measuring the author's padding instead let the engine
+break a line that only overflowed because of padding this pass then
+removed; formatting the output again found the line fitting and joined it
+back up, and the fail-safe declined the file as non-idempotent. Fit is
+therefore decided on the flush-left width, so it comes out the same whether
+or not the padding is still there.
+
 The four modes
 --------------
 Taken from verible, the closest peer formatter, which also defaults to
@@ -48,7 +59,8 @@ Abandon-if-over-limit
 Copied verbatim from verible, and worth copying: if aligning a group would
 push any of its lines past ``print_width``, the whole group falls back to
 flush-left. Alignment never causes an overflow -- which is what lets it stay
-on by default.
+on by default. A block ``infer`` *reproduces* is exempt: it is the author's
+table as written, and is kept even where the author padded it past the width.
 """
 
 from __future__ import annotations
@@ -61,9 +73,11 @@ from .width import width_of
 
 __all__ = [
     "ALIGN_MARK",
+    "PAD_MARK",
     "AlignMode",
     "GroupBoundary",
     "align_text",
+    "column_stop",
     "strip_marks",
 ]
 
@@ -72,7 +86,36 @@ __all__ = [
 #: here), so a mark can never collide with content.
 ALIGN_MARK = "\x00"
 
+#: Zero-width stand-in for one column of the author's padding after a
+#: :data:`ALIGN_MARK`. It only has this meaning inside the run of spacing that
+#: directly follows a mark; anywhere else it is left alone, because a
+#: ``Verbatim`` payload may hold a literal one.
+PAD_MARK = "\x01"
+
+# A column stop and the spacing after it, padding included.
+_STOP_RUN = re.compile("\x00[ \x01]*")
+
 _DEFAULT_MIN_SPACING = 1
+
+
+def column_stop(spacing: int, floor: int, *, measured: bool = False) -> str:
+    """A column stop followed by *spacing* columns of spacing.
+
+    Only the first ``min(spacing, floor)`` columns are spaces the engine
+    measures; the rest is :data:`PAD_MARK`, which it does not. *floor* is the
+    gap ``flush-left`` leaves at this stop, so a line the engine judged to fit
+    still fits once this pass has flushed it.
+
+    *measured* makes all of it spaces, for ``preserve``: that mode keeps the
+    author's spacing whatever the width, so line breaking has to see it.
+    """
+    seen = spacing if measured else min(spacing, floor)
+    return ALIGN_MARK + " " * seen + PAD_MARK * (spacing - seen)
+
+
+def _plain(text: str) -> str:
+    """*text* with its stops removed and the padding after them made spaces."""
+    return _STOP_RUN.sub(lambda m: " " * (len(m.group()) - 1), text)
 
 
 class AlignMode(str, Enum):
@@ -112,7 +155,7 @@ def strip_marks(text: str) -> str:
     This is the ``preserve`` implementation, and also what a caller uses when
     it wants no alignment pass at all.
     """
-    return text.replace(ALIGN_MARK, "")
+    return _plain(text)
 
 
 #: A cell whose content is a comment. Used for one thing: giving the
@@ -166,7 +209,7 @@ def align_text(
 
     for i, line in enumerate(lines):
         if out[i] is None:
-            out[i] = line.replace(ALIGN_MARK, "")
+            out[i] = _plain(line)
     return "\n".join(out)
 
 
@@ -197,7 +240,7 @@ class _Line:
 
 
 def _parse_line(line: str) -> _Line:
-    raw = line.replace(ALIGN_MARK, "")
+    raw = _plain(line)
     blank = not raw.strip()
     indent = len(raw) - len(raw.lstrip(" \t"))
 
@@ -205,7 +248,7 @@ def _parse_line(line: str) -> _Line:
     cells = [parts[0]]
     pads: List[int] = []
     for part in parts[1:]:
-        stripped = part.lstrip(" ")
+        stripped = part.lstrip(" " + PAD_MARK)
         pads.append(len(part) - len(stripped))
         cells.append(stripped)
     return _Line(cells, pads, indent, blank)
@@ -227,7 +270,7 @@ def _is_boundary(line: str, parsed: _Line, boundary: GroupBoundary) -> bool:
     if boundary in (
         GroupBoundary.SEPARATOR_COMMENTS,
         GroupBoundary.BLANK_LINES_AND_SEPARATOR_COMMENTS,
-    ) and _SEPARATOR_COMMENT.match(line.replace(ALIGN_MARK, "")):
+    ) and _SEPARATOR_COMMENT.match(_plain(line)):
         return True
     return False
 
@@ -344,11 +387,16 @@ def _resolve_group(
         # ``infer`` exists to flatten. Getting this backwards reproduces every
         # ragged block in the corpus, which is how the first version of this
         # function behaved and how it was caught.
+        #
+        # A reproduced run is *not* held to the over-limit rule below. It is
+        # the author's own table, and the line breaking that came before it
+        # measured the run flush-left (see :func:`column_stop`), so a run the
+        # author padded past the width stays that way, as it was written.
         lone = len(members) < 2
         for run in _runs(parsed, members):
             if lone or (len(run) > 1 and _was_aligned(parsed, run)):
                 for i in run:
-                    out[i] = lines[i].replace(ALIGN_MARK, "")
+                    out[i] = _plain(lines[i])
             else:
                 _emit_flush_left(parsed, run, min_spacing,
                                  comment_spacing, out)

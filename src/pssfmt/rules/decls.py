@@ -54,7 +54,7 @@ from __future__ import annotations
 
 from typing import Any, List, NamedTuple, Optional, Tuple
 
-from ..layout import ALIGN_MARK, Layout, concat, indent, text
+from ..layout import AlignMode, Layout, column_stop, concat, indent, text
 from ..style import Construct, SemicolonMode, Site
 from .emit import (
     code_span,
@@ -446,7 +446,13 @@ def _trailing(ctx: Any, token_index: int) -> Optional[Layout]:
         # Re-anchoring a tab means guessing a tab width, which is a display
         # setting rather than a fact about the file. Reproduced as written.
         return text(body)
-    return text(ALIGN_MARK + " " * max(gap, 1) + stripped)
+    # Measured as the spacing flush-left would leave, not the author's: see
+    # :func:`pssfmt.layout.align.column_stop`.
+    preserve = ctx.style.alignment is AlignMode.PRESERVE
+    return text(column_stop(max(gap, 1),
+                            ctx.style.spaces_before_trailing_comment,
+                            measured=preserve)
+                + stripped)
 
 
 def _effective(node: Any) -> Any:

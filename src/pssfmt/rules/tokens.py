@@ -83,8 +83,8 @@ from typing import (Any, Callable, Dict, List, Mapping, Optional, Sequence,
 
 from dataclasses import dataclass
 
-from ..layout import (ALIGN_MARK, LINE, SOFTLINE, Layout, align_to, concat,
-                      fill_with, group, indent, text)
+from ..layout import (LINE, SOFTLINE, AlignMode, Layout, align_to,
+                      column_stop, concat, fill_with, group, indent, text)
 from ..style import BreakMode, Construct, Site
 
 __all__ = ["WORD", "Vocabulary", "Wrap", "must_separate", "floor_gap",
@@ -352,6 +352,7 @@ def emit_span(ctx: Any,
     because a policy for lists that do not fit was added.
     """
     trivia = ctx.trivia
+    preserve = ctx.style.alignment is AlignMode.PRESERVE
     code = trivia.code_indices
     if first > last:
         return None
@@ -438,7 +439,8 @@ def emit_span(ctx: Any,
                 broke_at = len(parts)
                 parts.append(LINE if gap else SOFTLINE)
             elif pos in mark_at and gap and original is not None:
-                parts.append(text(ALIGN_MARK + " " * max(gap, original)))
+                parts.append(text(column_stop(max(gap, original), gap,
+                                               measured=preserve)))
             elif gap:
                 parts.append(text(" " * gap))
         if pos != last and not _discardable(entry.raw_trailing):
