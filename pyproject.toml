@@ -68,6 +68,15 @@ classifiers = [
 # `tests/corpus/test_semicolon_grammar.py`). Wheels cover the same cp310-cp314
 # matrix as 3.1.7, so no platform support changes with this raise.
 #
+# **Raised to 3.4.0 on 2026-10-21, for 0.5.1.** 3.4.0 changed two parse-tree
+# shapes `rules/` reads: an `else if` chain is one `procedural_if_else_stmt`
+# holding `procedural_else_if_clause` links instead of an `if` nested in each
+# `else`, and `in` is an alternative of `expression` instead of an
+# `in_expression` of its own. pssfmt reads only the new shapes, and under the
+# old floor a fresh install resolved 3.4.0 and declined every `else if` chain
+# -- which is how 0.5.0's CI failed and why it was never published. Same
+# cp310-cp314 wheel matrix as 3.2.0.
+#
 # Everything under src/pssfmt/layout/ works with no dependency at all, by
 # design (formatter.md section 10.3, enforced by T-9).
 #
@@ -78,7 +87,7 @@ classifiers = [
 # is actually found, and T-9's zero-dependency promise covers
 # `src/pssfmt/layout/`, which does not reach it.
 dependencies = [
-    "pssparser>=3.2.0",
+    "pssparser>=3.4.0",
     "tomli>=1.1.0; python_version < '3.11'",
 ]
 dynamic = ["version"]

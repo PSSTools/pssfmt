@@ -932,34 +932,73 @@ def _braced_body(node: Any) -> Optional[Any]:
     return None
 
 
-def _branches(node: Any):
-    """``(then_block, else_stmt)`` for an ``if``, or ``(None, None)``.
+def _parts(node: Any):
+    """``(then_stmt, clauses, else_stmt)`` of a ``procedural_if_else_stmt``.
 
-    Both halves come from the *direct* children, and the ``else`` half is
-    found by position relative to ``TOK_ELSE`` rather than by taking the
-    second ``procedural_stmt``. Same answer today; the positional version
-    stops being right the moment the grammar grows an alternative, and it
-    reads as though it were checking something it is not.
+    pssparser 3.4 parses a chain flat: ``'if' '(' e ')' procedural_stmt
+    procedural_else_if_clause* ('else' procedural_stmt)?``, each clause being
+    ``'else' 'if' '(' e ')' procedural_stmt``. Before it, every ``else if``
+    was an ``if`` nested in the ``else`` of the one before, one level per
+    link. Both statements come back through ``_effective``; the ``else`` one
+    is found by position relative to the node's own ``TOK_ELSE``, which no
+    clause's ``else`` is, since each clause owns its own.
     """
     from .decls import _effective
 
     seen_else = False
-    then_block = else_stmt = None
+    then_stmt = else_stmt = None
+    clauses = []
     for child in node.children:
         if not child.is_rule:
             if getattr(child.token, "type_name", None) == "TOK_ELSE":
                 seen_else = True
             continue
-        if child.rule_name != "procedural_stmt":
-            continue
-        if seen_else:
-            else_stmt = _effective(child)
-        else:
-            inner = _effective(child)
-            if getattr(inner, "rule_name", None) \
-                    == "procedural_sequence_block_stmt":
-                then_block = inner
-    return then_block, else_stmt
+        if child.rule_name == "procedural_else_if_clause":
+            clauses.append(child)
+        elif child.rule_name == "procedural_stmt":
+            if seen_else:
+                else_stmt = _effective(child)
+            else:
+                then_stmt = _effective(child)
+    return then_stmt, clauses, else_stmt
+
+
+def _block_of(stmt: Any) -> Optional[Any]:
+    """*stmt* if it is a braced block, else ``None``."""
+    if getattr(stmt, "rule_name", None) == "procedural_sequence_block_stmt":
+        return stmt
+    return None
+
+
+def _clause_body(clause: Any) -> Optional[Any]:
+    """The braced block of an ``else if`` clause, or ``None``."""
+    from .decls import _effective
+
+    for child in clause.children:
+        if child.is_rule and child.rule_name == "procedural_stmt":
+            return _block_of(_effective(child))
+    return None
+
+
+class _FromIf:
+    """An ``else if`` clause seen from its ``if``.
+
+    The ``else`` is written by the link before, as the tail after its ``}``
+    -- the same ``} else`` a bare ``else { … }`` gets. So the header this
+    link contributes starts at ``if``, and a header's start is its node's
+    ``start_token``. A view rather than a parameter: ``_block``, ``_header``
+    and the site walk all read a node's span and children, and nothing else.
+    """
+
+    is_rule = True
+    rule_name = "procedural_else_if_clause"
+
+    def __init__(self, clause: Any) -> None:
+        self.children = [c for c in clause.children
+                         if c.is_rule or c.token.type_name != "TOK_ELSE"]
+        self.start_token = next(c.token_index for c in self.children
+                                if not c.is_rule)
+        self.stop_token = clause.stop_token
 
 
 def _control_block(ctx: Any, node: Any, body: Any, construct: Construct,
@@ -1015,29 +1054,30 @@ def _else_pos(ctx: Any, node: Any) -> Optional[int]:
 
 def _chain(ctx: Any, node: Any) -> Optional[List[Branch]]:
     """Every branch of an ``if``/``else if``/``else`` chain, or ``None``."""
-    branches: List[Branch] = []
-    else_pos = None
-    while True:
-        then_block, else_stmt = _branches(node)
-        if then_block is None:
+    then_stmt, clauses, else_stmt = _parts(node)
+    then_block = _block_of(then_stmt)
+    if then_block is None:
+        return None
+    first = _control_branch(ctx, node, then_block, Construct.IF_BODY)
+    if first is None:
+        return None
+    branches: List[Branch] = [first]
+    for clause in clauses:
+        body = _clause_body(clause)
+        if body is None:
             return None
-        branch = _control_branch(ctx, node, then_block, Construct.IF_BODY,
-                                 else_pos)
+        branch = _control_branch(ctx, _FromIf(clause), body,
+                                 Construct.IF_BODY, _else_pos(ctx, clause))
         if branch is None:
             return None
         branches.append(branch)
-        if else_stmt is None:
-            return branches
-        else_pos = _else_pos(ctx, node)
-        name = getattr(else_stmt, "rule_name", None)
-        if name == "procedural_if_else_stmt":
-            node = else_stmt
-            continue
-        if name == "procedural_sequence_block_stmt":
-            branches.append(Branch(else_stmt, else_stmt, Construct.ELSE_BODY,
-                                   else_pos=else_pos))
-            return branches
-        return None
+    if else_stmt is not None:
+        block = _block_of(else_stmt)
+        if block is None:
+            return None
+        branches.append(Branch(block, block, Construct.ELSE_BODY,
+                               else_pos=_else_pos(ctx, node)))
+    return branches
 
 
 def _nothing_but_whitespace_before(ctx: Any, pos: int) -> bool:
@@ -1096,54 +1136,74 @@ def _if_open(ctx: Any, node: Any) -> Layout:
     K&R, the Linux kernel, Google C++, lowRISC -- and Allman appears nowhere
     in this corpus, so the alternative is a shape no voice here is asking for.
 
-    **The chain is the part that is wrong by default.** ``else if`` is not a
-    construct in PSS: it is an ``else`` whose statement is another
-    ``procedural_if_else_stmt``, so the obvious recursion -- build the else
-    branch and indent it like a body -- produces a staircase::
+    **The chain is the part that is wrong by default.** In the LRM ``else
+    if`` is not a construct: it is an ``else`` whose statement is another
+    ``if``, so the obvious recursion -- build the else branch and indent it
+    like a body -- produces a staircase::
 
         } else {
             if (b) {
 
-    The nested ``if`` is therefore composed *flat*, with no indent and no
+    Each ``else if`` link is therefore composed *flat*, with no indent and no
     line break, which is the whole of what makes ``} else if (b) {`` come out
     on one line. Pinned by a three-branch chain in ``T-44``, because a green
-    suite will not otherwise notice.
+    suite will not otherwise notice. pssparser 3.4 parses the links as a list
+    of ``procedural_else_if_clause`` rather than nesting them, which suits
+    this shape better; see :func:`_parts`.
 
     A branch that is not braced declines the whole statement. See
     :func:`_braced_body`.
     """
-    then_block, else_stmt = _branches(node)
+    then_stmt, clauses, else_stmt = _parts(node)
+    then_block = _block_of(then_stmt)
     if then_block is None:
         return _reproduce(ctx, node)
-    if else_stmt is None:
-        laid = _control_block(ctx, node, then_block, Construct.IF_BODY)
-        return laid if laid is not None else _reproduce(ctx, node)
 
-    name = getattr(else_stmt, "rule_name", None)
-    if name == "procedural_if_else_stmt":
-        # The chain. Flat, deliberately: see the docstring. The open shape,
-        # since whether to keep it on one line is decided for the whole chain.
-        otherwise = _if_open(ctx, else_stmt)
-    elif name == "procedural_sequence_block_stmt":
-        otherwise = _block(ctx, else_stmt, Construct.ELSE_BODY)
-    else:
-        return _reproduce(ctx, node)
-    # The two seams a tail creates: `}` to `else`, and `else` to whatever
-    # follows it. Both are outside any span, so nothing else checks them.
-    then_span = code_span(ctx.trivia, then_block)
-    if then_span is None \
-            or not _nothing_but_whitespace_before(ctx, then_span[1] + 1) \
-            or not _nothing_but_whitespace_before(ctx, then_span[1] + 2):
-        return _reproduce(ctx, node)
-    if isinstance(otherwise, Verbatim):
-        # The else half declined. Reproducing *it* inside a formatted `if`
+    # One layout per link -- `if (x) { … }`, `if (y) { … }`, `{ … }` -- joined
+    # by `} else`, flat: see the docstring. Joined in a single concat rather
+    # than each link carrying the rest of the chain as its tail, which is the
+    # same sequence of parts and is linear: a nested tail is flattened again
+    # at every level, and a generated chain is thousands of links long.
+    links: List[Layout] = []
+    closes: List[Any] = [then_block]
+    for clause in clauses:
+        body = _clause_body(clause)
+        if body is None:
+            return _reproduce(ctx, node)
+        laid = _control_block(ctx, _FromIf(clause), body, Construct.IF_BODY)
+        if laid is None:
+            return _reproduce(ctx, node)
+        links.append(laid)
+        closes.append(body)
+    if else_stmt is not None:
+        block = _block_of(else_stmt)
+        if block is None:
+            return _reproduce(ctx, node)
+        links.append(_block(ctx, block, Construct.ELSE_BODY))
+    if any(isinstance(link, Verbatim) for link in links):
+        # A later link declined. Reproducing *it* inside a formatted `if`
         # would put reproduced text after a composed gap, which is the one
         # thing `_reproduce` exists to keep from happening mid-construct.
         return _reproduce(ctx, node)
-    laid = _control_block(ctx, node, then_block, Construct.IF_BODY,
-                          tail=concat([_after_the_brace(ctx, "else"),
-                                       otherwise]))
-    return laid if laid is not None else _reproduce(ctx, node)
+    # The two seams each `} else` creates: `}` to `else`, and `else` to
+    # whatever follows it. Both are outside any span, so nothing else checks
+    # them.
+    for block in closes[:len(links)]:
+        span = code_span(ctx.trivia, block)
+        if span is None \
+                or not _nothing_but_whitespace_before(ctx, span[1] + 1) \
+                or not _nothing_but_whitespace_before(ctx, span[1] + 2):
+            return _reproduce(ctx, node)
+    first = _control_block(ctx, node, then_block, Construct.IF_BODY)
+    if first is None:
+        return _reproduce(ctx, node)
+    if not links:
+        return first
+    parts: List[Layout] = [first]
+    for link in links:
+        parts.append(_after_the_brace(ctx, "else"))
+        parts.append(link)
+    return concat(parts)
 
 
 def _loop(ctx: Any, node: Any) -> Layout:

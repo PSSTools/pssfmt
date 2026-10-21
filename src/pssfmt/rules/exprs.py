@@ -424,6 +424,26 @@ _BOUND_SITES = {
 #: can hold two kinds. See there.
 _DOMAIN_BEARING = frozenset({"integer_type", "string_type"})
 
+def _rule_of(node: Any) -> str:
+    """*node*'s rule name, as the tables in this module key it.
+
+    One name differs from the grammar's. Through pssparser 3.3, ``x in [1..4]``
+    and ``x in coll`` were an ``expression`` holding an ``in_expression``; 3.4
+    puts ``in`` at relational precedence, so both forms are alternatives of
+    ``expression`` itself, with the ``in`` and the brackets as its direct
+    children. An ``expression`` holding a direct ``in`` is read here as the
+    ``in_expression`` it used to contain, so the set bracket, the range-list
+    wrap and the ``**`` operand test all see the construct they were written
+    for.
+    """
+    name = node.rule_name
+    if name == "expression" and any(
+            not c.is_rule and c.token is not None
+            and c.token.type_name == "TOK_IN" for c in node.children):
+        return "in_expression"
+    return name
+
+
 #: Constructs this module refuses outright. Each is argued in the module
 #: docstring; none of them is "not implemented yet" in the sense of being an
 #: oversight, and three of them belong to a later item by name.
@@ -487,7 +507,7 @@ def _is_simple(node: Any) -> bool:
         cur = stack.pop()
         if not cur.is_rule:
             continue
-        if cur.rule_name not in _SIMPLE_OPERAND_RULES:
+        if _rule_of(cur) not in _SIMPLE_OPERAND_RULES:
             return False
         stack.extend(cur.children)
     return True
@@ -634,7 +654,7 @@ def wrap_for(ctx: Any, node: Any,
         return None
 
     listed = found[0]
-    construct, open_type, close_type, sep_rule = _WRAPPED_LISTS[listed.rule_name]
+    construct, open_type, close_type, sep_rule = _WRAPPED_LISTS[_rule_of(listed)]
     open_at = close_at = None
     # `integer_type` carries two bracket pairs and only the one after `in` is
     # a list. For every other rule here there is no `in`, so the flag never
@@ -694,7 +714,7 @@ def _is_a_list(node: Any) -> bool:
     to wrap -- which is how a 86-column prototype came out unbroken with the
     whole mechanism apparently working.
     """
-    if not node.is_rule or node.rule_name not in _WRAPPED_LISTS:
+    if not node.is_rule or _rule_of(node) not in _WRAPPED_LISTS:
         return False
     if node.rule_name not in _DOMAIN_BEARING:
         return True
@@ -753,7 +773,7 @@ def _walk(ctx: Any, node: Any, sites: Dict[int, Site],
     """Depth-first assignment. ``False`` means a declined construct was met."""
     if not node.is_rule:
         return True
-    name = node.rule_name
+    name = _rule_of(node)
     if name in _DECLINED:
         return False
     if name == "shift_op" and _terminal_count(node) != 1:

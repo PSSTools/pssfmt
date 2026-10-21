@@ -573,6 +573,49 @@ class TestControlFlow:
             "        }",
         ]
 
+    def test_a_chain_from_pssparser_3_4_keeps_every_link(self):
+        """pssparser 3.4 parses ``else if`` links as a list of clauses on
+        one node rather than nesting them. A reader of the old shape saw one
+        link and dropped the rest -- the fail-safe caught it as lost tokens.
+        Each link's body holds a nested ``if`` too, which must still indent."""
+        assert body("        if(a){\nx=1;}else if(b){\nif(c){\nx=2;}}"
+                    "else if(d){\nx=3;}") == [
+            "        if (a) {",
+            "            x = 1;",
+            "        } else if (b) {",
+            "            if (c) {",
+            "                x = 2;",
+            "            }",
+            "        } else if (d) {",
+            "            x = 3;",
+            "        }",
+        ]
+
+    def test_a_comment_before_an_else_if_is_kept(self):
+        src = ("component c {\n    function void f() {\n"
+               "        if (a) {\n            x = 1;\n        } // one\n"
+               "        else if (b) {\n            x = 2;\n        }\n"
+               "    }\n}\n")
+        result = format_safely(src, formatter=format_source)
+        assert result.ok, result.diagnostic()
+        assert "// one" in result.text
+
+    def test_a_generated_chain_thousands_of_links_long(self):
+        """The shape pssparser 3.4 changed its grammar for: register offset
+        functions generated as one ``else if`` per register. Each link once
+        carried the rest of the chain as its tail, and every token lookup
+        scanned the file, so this was quadratic -- 2000 links took 11 s."""
+        n = 2000
+        links = ["if (a == 0) {"] + ["} else if (a == %d) {" % i
+                                     for i in range(1, n)]
+        src = "\n".join("        %s\n            r = %d;" % (l, i)
+                         for i, l in enumerate(links)) + "\n        }"
+        result = format_safely(
+            "component c {\n    function void f() {\n%s\n    }\n}\n" % src,
+            formatter=format_source)
+        assert result.ok, result.diagnostic()
+        assert result.text.count("} else if (a == ") == n - 1
+
     def test_it_nests_inside_another_if(self):
         """A *genuine* nesting, which must indent -- the other half of the
         test above, and the one that fails if the flat composition is applied

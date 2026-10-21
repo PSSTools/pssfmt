@@ -151,6 +151,28 @@ class Trivia:
         return bool(self.leading or self.trailing)
 
 
+class _Positions(tuple):
+    """Code-token stream indices, ascending, with a logarithmic ``index``.
+
+    Rule builders turn a token into its code position with
+    ``code_indices.index(tok)`` all over the rule layer, and ``tuple.index``
+    is a linear scan: per token, that made formatting quadratic in the file,
+    which a generated ``else if`` chain thousands of links long makes
+    visible. The tuple is sorted by construction, so this bisects instead,
+    with ``tuple.index``'s contract -- the position, or ``ValueError``.
+    """
+
+    __slots__ = ()
+
+    def index(self, value: Any, *args: Any) -> int:  # type: ignore[override]
+        if args:
+            return super().index(value, *args)
+        pos = bisect.bisect_left(self, value)
+        if pos < len(self) and self[pos] == value:
+            return pos
+        raise ValueError(f"{value!r} is not a code token")
+
+
 class TriviaMap:
     """The section 3.1 attachment, computed once for a token stream.
 
@@ -172,7 +194,7 @@ class TriviaMap:
         self._stream = stream
         self._max_blank_lines = max_blank_lines
         self._by_index: Dict[int, Trivia] = {}
-        self._code_indices: List[int] = []
+        self._code_indices: Tuple[int, ...] = _Positions()
         self._eof = Trivia(token=None)
         self._build()
 
@@ -185,7 +207,7 @@ class TriviaMap:
         toks = list(self._stream)
         code_positions = [i for i, t in enumerate(toks)
                           if t.channel == CHANNEL_DEFAULT]
-        self._code_indices = [toks[i].index for i in code_positions]
+        self._code_indices = _Positions(toks[i].index for i in code_positions)
 
         # Each run is the stretch of non-code tokens between two code tokens,
         # with `None` standing in for "start of file" and "end of file". A run
@@ -336,7 +358,9 @@ class TriviaMap:
 
     @property
     def code_indices(self) -> Tuple[int, ...]:
-        return tuple(self._code_indices)
+        # Built once. Copying it per call made every lookup O(file), and rule
+        # builders look it up per token.
+        return self._code_indices
 
     def comment_before(self, token_or_index: Any) -> Tuple[Comment, ...]:
         """Comments immediately before a token, whichever token owns them.

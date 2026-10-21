@@ -6,7 +6,31 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
-## 0.5.0 — 2026-10-21
+## 0.5.1 — 2026-10-21
+
+There is no 0.5.0 on PyPI. A `v0.5.0` tag exists, but its tests failed
+against pssparser 3.4.0 -- which the old `>=3.2.0` floor let CI install --
+and the publish job was skipped; everything from that tag is in this release.
+
+### Changed — pssparser 3.4.0 or newer
+
+`pssfmt` now requires **pssparser 3.4.0**, which changed two parse-tree shapes
+the rules read. An `else if` chain is now one `if` statement holding a list
+of `else if` clauses rather than an `if` nested in each `else`, and `in`
+moved to relational precedence, so `x in [1..4] && y in [2, 3]` is two tests.
+Under 3.4.0, 0.4.2 and 0.5.0 declined every file with a procedural `else if`
+chain (the fail-safe reported lost tokens) and left `in [...]` constraints
+unformatted; nothing was written wrong. Wheels cover the same cp310-cp314
+matrix as 3.2.0.
+
+### Fixed — long files formatted in quadratic time
+
+Every token lookup the rules make copied and then scanned the file's whole
+token list, and each link of an `else if` chain was re-flattened once per
+link after it. A generated chain of 2000 links took 11 s; it now takes about
+1 s, and 10000 links about 7 s.
+
+## 0.5.0 — 2026-10-21 (not published)
 
 ### Changed — a one-line control branch stays on one line
 

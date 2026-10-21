@@ -467,3 +467,17 @@ class TestTheListBrace:
     def test_it_is_idempotent(self):
         once = fmt(in_constraint("unique{a,b};"))
         assert fmt(once) == once
+
+
+class TestInAtRelationalPrecedence:
+    """pssparser 3.4 parses ``in`` beside the relational operators: both its
+    forms are alternatives of ``expression`` rather than an ``in_expression``
+    of their own. The set bracket and the range-list wrap still find it."""
+
+    def test_two_tests_joined_by_and(self):
+        assert fmt(in_constraint("x in[1..4]&&y in[2,3];")) == \
+            in_constraint("x in [1..4] && y in [2, 3];")
+
+    def test_the_collection_form(self):
+        assert fmt(in_constraint("x  in  coll;")) == \
+            in_constraint("x in coll;")
