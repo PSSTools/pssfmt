@@ -101,7 +101,7 @@ class TestABlockIsADeclarationBodyWithADifferentKeyword:
         headers agree with it, which is the point of having measured it before
         the first caller arrived rather than when one did.
         """
-        src = in_activity("repeat( 4 ){ do step ; }")
+        src = in_activity("repeat( 4 ){\n do step ; }")
         assert fmt(src) == in_activity("repeat (4) {", "    do step;", "}")
 
     def test_a_block_nests(self):
@@ -243,7 +243,7 @@ class TestTheIteratorColon:
 
     def test_the_body_is_laid_out_too(self):
         """The half that was already working, pinned so it stays working."""
-        out = fmt(in_activity("repeat (ri : 4) { do   step ; }"))
+        out = fmt(in_activity("repeat (ri : 4) {\n do   step ; }"))
         assert "                do step;" in out
 
     def test_a_repeat_without_an_iterator_still_works(self):

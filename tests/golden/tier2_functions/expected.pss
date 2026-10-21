@@ -113,6 +113,17 @@ component fn_c {
         }
     }
 
+    // A branch the author wrote on one line -- header, brace, one statement,
+    // brace -- stays on one line, with its brace column if the author lined
+    // one up. A chain is kept whole or opened whole.
+    function void one_line(int n) {
+        if (n > 0) { n -= 1; } else { n = 0; }
+        if (n == 1)      { n = 0; }
+        else if (n == 2) { n = 3; }
+        else             { n = 9; }
+        foreach (i : chans) { poke(i); }
+    }
+
     // Two still declined, and a third that is not. An unbraced branch would
     // need braces inserted, which changes the token stream; `repeat … while`
     // puts its block in the *middle* of the statement, so its tail would be a

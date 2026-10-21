@@ -152,6 +152,9 @@ lowRISC all write it this way, and Allman appears nowhere in this corpus.
        sum = 0;
    }
 
+That is the shape of a branch the author wrote open. One written on one line
+is kept on one line -- see `A branch written on one line`_ below.
+
 Two consequences of that shape are decisions in their own right:
 
 **A chain is flat.** ``else if`` is not a construct in PSS -- it is an
@@ -921,12 +924,44 @@ single most common reason a team disables a formatter after adopting it.
 
 **It will not collapse a body onto one line.** A ``constraint`` block holding
 one item, a function whose body is a single call, an ``activity`` with one
-traversal, a branch of an ``if`` -- each is opened out and stays open, however
-easily it would fit. This is a commitment rather than a default because the
+traversal, a branch of an ``if`` written open -- each is opened out and stays
+open, however easily it would fit. This is a commitment rather than a default because the
 corpus is emphatic and the diff would not be: 31 of its 32 named constraint
 blocks are written open, 21 of those holding exactly one item, and 117 of its
 118 function bodies likewise. Collapsing them would rewrite a deliberate
 convention across the smallest and most numerous constructs in a file.
+
+A branch written on one line
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The commitment above is about *joining*, and nothing joins. The reverse is
+also not done to a control statement the author wrote compactly: a branch of
+an ``if``, ``foreach``, ``repeat`` or ``while`` -- procedural, activity or
+constraint -- whose header, ``{``, **one** statement and ``}`` sit on a
+single source line, with no comment anywhere inside, stays on one line::
+
+   if (val == 1)      { ret = 0; }
+   else if (val == 2) { ret = 3; }
+   else               { ret = 9; }
+   foreach (i : arr) { sum += i; }
+
+Everything inside is still formatted; only the line structure is the
+author's. Three things follow:
+
+* **A chain is kept whole or opened whole.** If any branch is broken, holds
+  two statements or a comment, the whole chain opens out with ``} else {``
+  as above.
+* **Width opens, never joins.** If any line of the chain would pass
+  ``print_width``, the whole chain opens out. A branch written open is never
+  joined at any width, so the shape cannot change on an unrelated edit.
+* **``else`` goes where the author put it** -- on the line after the previous
+  ``}``, or after it on the same line -- and a brace column the author lined
+  up stays lined up. One that was not lined up gets one space.
+
+Argued, not measured: the corpus has one file with such branches (three
+loops). It is the shape of a dispatch table written as code, and opening it
+out triples its length and destroys the only thing it was saying.
+``gofmt`` keeps a function body on one line for the same reason.
 
 The one construct that *is* written on one line is ``enum``, and it is not an
 exception to this rule -- it is a different rule. What decides an enum's shape

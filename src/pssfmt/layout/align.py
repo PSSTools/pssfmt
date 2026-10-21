@@ -210,6 +210,10 @@ def align_text(
     for i, line in enumerate(lines):
         if out[i] is None:
             out[i] = _plain(line)
+    if mode is AlignMode.INFER:
+        for chain in _comment_chains(lines, parsed, boundary):
+            _resolve_comment_chain(parsed, chain, print_width,
+                                   comment_spacing, out)
     return "\n".join(out)
 
 
@@ -426,6 +430,117 @@ def _resolve_group(
 
     for i, textline in rendered.items():
         out[i] = textline
+
+
+def _comment_column(p: _Line) -> Optional[int]:
+    """The column the author's trailing comment on *p* starts at, or ``None``.
+
+    Measured on the line as laid out with the author's padding at every stop,
+    which is the same approximation :func:`_was_aligned` makes.
+    """
+    if not p.marked or not _IS_COMMENT.match(p.cells[-1]):
+        return None
+    return sum(width_of(c) for c in p.cells[:-1]) + sum(p.pads)
+
+
+def _comment_chains(lines: Sequence[str], parsed: Sequence[_Line],
+                    boundary: GroupBoundary) -> List[List[int]]:
+    """Lines whose trailing comments are read as one column.
+
+    The trailing-comment column is a table of its own, and the most common
+    one there is -- but the code columns are grouped in a way that cannot see
+    it. :func:`_runs` splits a group on its *first* stop, so a block whose
+    code differs and whose comments agree comes apart into runs of one::
+
+        int a;          // first       <- first stop after `int`
+        bit[8] bb;      // second      <- first stop after `bit[8]`
+        x = 22;         // third       <- first stop before `=`
+
+    and :func:`_groups` ends a group at every change of indentation, so a
+    column that hangs off the ``{`` of each branch of a chain is split by the
+    bodies between them::
+
+        if (a) {        // case 1
+            x = 0;
+        } else {        // case 2
+
+    A chain is therefore built over the whole text: the commented lines at one
+    indentation, carried across lines nested deeper than it and across lines
+    at the same depth with no comment, and ended by a boundary line or a line
+    shallower than it. The chains of a nested block are built alongside. Every chain has at least two lines; a single commented
+    line is no evidence, and is left as its group resolved it.
+    """
+    chains: List[List[int]] = []
+    # One open chain per depth, so a nested block's chain does not end the
+    # one around it.
+    open_chains: dict = {}
+
+    def close(depths: Sequence[int]) -> None:
+        for d in depths:
+            chain = open_chains.pop(d)
+            if len(chain) > 1:
+                chains.append(chain)
+
+    for i, line in enumerate(lines):
+        p = parsed[i]
+        if p.blank or _is_boundary(line, p, boundary):
+            close(list(open_chains))
+            continue
+        close([d for d in open_chains if d > p.indent])
+        if _comment_column(p) is not None:
+            open_chains.setdefault(p.indent, []).append(i)
+    close(list(open_chains))
+    chains.sort()
+    return chains
+
+
+def _resolve_comment_chain(parsed: Sequence[_Line], chain: Sequence[int],
+                           print_width: int, comment_spacing: int,
+                           out: List[str]) -> None:
+    """``infer`` for one comment chain, after the code columns are settled.
+
+    The same decision :func:`_resolve_group` makes for code, made again for
+    the comment column alone: a run of consecutive chain lines whose comments
+    the author started at one column -- with at least one padded past a single
+    space, the evidence :func:`_was_aligned` asks for -- keeps that column. It
+    moves right only if the settled code now reaches it, and then to the
+    tightest column ``spaces_before_trailing_comment`` allows; the run is left
+    alone if that would push a line over ``print_width``. A run of one is
+    a near-miss its neighbours disagree with, and is flushed.
+    """
+    runs: List[List[int]] = []
+    for i in chain:
+        if runs and _comment_column(parsed[i]) \
+                == _comment_column(parsed[runs[-1][-1]]):
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+
+    for run in runs:
+        heads = {}
+        for i in run:
+            comment = parsed[i].cells[-1]
+            heads[i] = out[i][: len(out[i]) - len(comment)].rstrip(" ")
+        target = 0
+        if len(run) > 1 and any(parsed[i].pads[-1] > _DEFAULT_MIN_SPACING
+                                for i in run):
+            # The author's column, if the settled code still leaves a gap
+            # before it: the floor is for columns this pass computes, and
+            # cannot move one the author built.
+            target = _comment_column(parsed[run[0]])
+            if any(width_of(h) + _DEFAULT_MIN_SPACING > target
+                   for h in heads.values()):
+                target = max(width_of(h) + comment_spacing
+                             for h in heads.values())
+        floor = _DEFAULT_MIN_SPACING if target else comment_spacing
+        rendered = {i: heads[i] + " " * max(target - width_of(heads[i]),
+                                            floor)
+                    + parsed[i].cells[-1] for i in run}
+        if any(width_of(t) > print_width and width_of(t) > width_of(out[i])
+               for i, t in rendered.items()):
+            continue
+        for i, t in rendered.items():
+            out[i] = t
 
 
 def _first_stop(p: _Line) -> int:

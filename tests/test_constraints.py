@@ -368,7 +368,7 @@ class TestControlItems:
     """
 
     def test_an_if_constraint_cuddles_its_else(self):
-        assert fmt(in_constraint("if(len>1024){addr%64==0;}else{x<2;}")) == \
+        assert fmt(in_constraint("if(len>1024){\naddr%64==0;}else{x<2;}")) == \
             in_constraint(
                 "if (len > 1024) {",
                 "    addr % 64 == 0;",
@@ -377,12 +377,12 @@ class TestControlItems:
                 "}")
 
     def test_a_chain_does_not_staircase(self):
-        out = fmt(in_constraint("if(a){x<1;}else if(b){x<2;}else{x<3;}"))
+        out = fmt(in_constraint("if(a){\nx<1;}else if(b){x<2;}else{x<3;}"))
         assert "            } else if (b) {" in out
         assert "                } else if (b) {" not in out
 
     def test_a_foreach_constraint_spaces_its_iterator(self):
-        assert fmt(in_constraint("foreach(i:chans){chans[i]<8;}")) == \
+        assert fmt(in_constraint("foreach(i:chans){\nchans[i]<8;}")) == \
             in_constraint(
                 "foreach (i : chans) {",
                 "    chans[i] < 8;",
@@ -391,7 +391,7 @@ class TestControlItems:
     def test_the_colon_less_foreach_still_works(self):
         """The corpus's only ``foreach`` is this spelling, and the colon is
         optional in the grammar."""
-        assert fmt(in_constraint("foreach(chans[i]){chans[i]<8;}")) == \
+        assert fmt(in_constraint("foreach(chans[i]){\nchans[i]<8;}")) == \
             in_constraint(
                 "foreach (chans[i]) {",
                 "    chans[i] < 8;",

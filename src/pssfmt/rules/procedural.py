@@ -214,12 +214,12 @@ of the corpus's seven wrapped calls join to between 86 and 108 columns.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from ..layout import AlignMode, column_stop, concat, text
 from ..layout.ir import Layout, Verbatim
 from ..style import Construct, Site
-from .decls import _block, _braces, _reproduce, sites_before
+from .decls import Branch, _block, _braces, _reproduce, one_line, sites_before
 from .emit import code_span
 from .exprs import (EXPRESSION_COLON, EXPRESSION_VOCABULARY, TREE_DECIDED,
                     sites_for, wrap_for)
@@ -969,6 +969,16 @@ def _control_block(ctx: Any, node: Any, body: Any, construct: Construct,
     The header runs from *node*'s first token to *body*'s ``{``, across two
     nodes, which is what ``_block``'s *body* parameter is for.
     """
+    sites = _control_sites(ctx, node, body)
+    if sites is None:
+        return None
+    return _block(ctx, node, construct, body=body,
+                  vocabulary=_CONTROL_HEADER_VOCABULARY, sites=sites,
+                  tail=tail)
+
+
+def _control_sites(ctx: Any, node: Any, body: Any) -> Any:
+    """The sites of a control header, up to *body*'s ``{``; ``None`` declines."""
     braces = _braces(body)
     if braces is None:
         return None
@@ -981,9 +991,53 @@ def _control_block(ctx: Any, node: Any, body: Any, construct: Construct,
     if iterator is not None:
         code = ctx.trivia.code_indices
         sites[code.index(iterator.token_index)] = Site.COLON_ITERATOR
-    return _block(ctx, node, construct, body=body,
-                  vocabulary=_CONTROL_HEADER_VOCABULARY, sites=sites,
-                  tail=tail)
+    return sites
+
+
+def _control_branch(ctx: Any, node: Any, body: Any, construct: Construct,
+                    else_pos: Optional[int] = None) -> Optional[Branch]:
+    """*node*'s header and *body*, as :func:`~pssfmt.rules.decls.one_line`
+    reads them; ``None`` where the header declines."""
+    sites = _control_sites(ctx, node, body)
+    if sites is None:
+        return None
+    return Branch(node, body, construct, _CONTROL_HEADER_VOCABULARY, sites,
+                  else_pos)
+
+
+def _else_pos(ctx: Any, node: Any) -> Optional[int]:
+    """Code position of *node*'s own ``else``."""
+    keyword = _direct_terminal(node, "TOK_ELSE")
+    if keyword is None:
+        return None
+    return ctx.trivia.code_indices.index(keyword.token_index)
+
+
+def _chain(ctx: Any, node: Any) -> Optional[List[Branch]]:
+    """Every branch of an ``if``/``else if``/``else`` chain, or ``None``."""
+    branches: List[Branch] = []
+    else_pos = None
+    while True:
+        then_block, else_stmt = _branches(node)
+        if then_block is None:
+            return None
+        branch = _control_branch(ctx, node, then_block, Construct.IF_BODY,
+                                 else_pos)
+        if branch is None:
+            return None
+        branches.append(branch)
+        if else_stmt is None:
+            return branches
+        else_pos = _else_pos(ctx, node)
+        name = getattr(else_stmt, "rule_name", None)
+        if name == "procedural_if_else_stmt":
+            node = else_stmt
+            continue
+        if name == "procedural_sequence_block_stmt":
+            branches.append(Branch(else_stmt, else_stmt, Construct.ELSE_BODY,
+                                   else_pos=else_pos))
+            return branches
+        return None
 
 
 def _nothing_but_whitespace_before(ctx: Any, pos: int) -> bool:
@@ -1024,6 +1078,17 @@ def _after_the_brace(ctx: Any, keyword: str) -> Layout:
 
 
 def _if_else(ctx: Any, node: Any) -> Layout:
+    """An ``if`` chain, opened out or kept one line per branch.
+
+    The open shape is :func:`_if_open`; :func:`~pssfmt.rules.decls.one_line`
+    keeps a chain the author wrote one line per branch.
+    """
+    opened = _if_open(ctx, node)
+    branches = _chain(ctx, node)
+    return opened if branches is None else one_line(ctx, branches, opened)
+
+
+def _if_open(ctx: Any, node: Any) -> Layout:
     """``if (x) { … }``, ``} else { … }``, ``} else if (y) { … }`` (``S-1``).
 
     Cuddled, and that is argued rather than measured: 5 instances in 3 files
@@ -1056,8 +1121,9 @@ def _if_else(ctx: Any, node: Any) -> Layout:
 
     name = getattr(else_stmt, "rule_name", None)
     if name == "procedural_if_else_stmt":
-        # The chain. Flat, deliberately: see the docstring.
-        otherwise = _if_else(ctx, else_stmt)
+        # The chain. Flat, deliberately: see the docstring. The open shape,
+        # since whether to keep it on one line is decided for the whole chain.
+        otherwise = _if_open(ctx, else_stmt)
     elif name == "procedural_sequence_block_stmt":
         otherwise = _block(ctx, else_stmt, Construct.ELSE_BODY)
     else:
@@ -1096,8 +1162,12 @@ def _loop(ctx: Any, node: Any) -> Layout:
     body = _braced_body(node)
     if body is None or _has_a_tail(ctx, node, body):
         return _reproduce(ctx, node)
-    laid = _control_block(ctx, node, body, _LOOP_RULES[node.rule_name])
-    return laid if laid is not None else _reproduce(ctx, node)
+    construct = _LOOP_RULES[node.rule_name]
+    laid = _control_block(ctx, node, body, construct)
+    if laid is None:
+        return _reproduce(ctx, node)
+    branch = _control_branch(ctx, node, body, construct)
+    return laid if branch is None else one_line(ctx, [branch], laid)
 
 
 def _has_a_tail(ctx: Any, node: Any, body: Any) -> bool:

@@ -530,8 +530,8 @@ class TestControlFlow:
     """
 
     @pytest.mark.parametrize("src", [
-        "if(n>0){n-=1;}else{n+=1;}",
-        "if (n > 0) { n -= 1; }\n        else { n += 1; }",
+        "if(n>0){\nn-=1;}else{n+=1;}",
+        "if (n > 0) {\n n -= 1; }\n        else { n += 1; }",
         "if (n > 0)\n        {\n            n -= 1;\n        }\n"
         "        else\n        {\n            n += 1;\n        }",
     ], ids=["tight", "else-on-its-own-line", "allman"])
@@ -545,7 +545,7 @@ class TestControlFlow:
         ]
 
     def test_an_if_without_an_else(self):
-        assert body("        if(n>0){n-=1;}") == [
+        assert body("        if(n>0){\nn-=1;}") == [
             "        if (n > 0) {",
             "            n -= 1;",
             "        }",
@@ -560,7 +560,7 @@ class TestControlFlow:
         branch. Three branches, because two would pass with the nesting only
         half wrong.
         """
-        assert body("        if(a){x=1;}else if(b){x=2;}else if(c){x=3;}"
+        assert body("        if(a){\nx=1;}else if(b){x=2;}else if(c){x=3;}"
                     "else{x=4;}") == [
             "        if (a) {",
             "            x = 1;",
@@ -577,7 +577,7 @@ class TestControlFlow:
         """A *genuine* nesting, which must indent -- the other half of the
         test above, and the one that fails if the flat composition is applied
         to a branch rather than to a chain."""
-        assert body("        if(a){if(b){x=1;}}") == [
+        assert body("        if(a){\nif(b){\nx=1;}}") == [
             "        if (a) {",
             "            if (b) {",
             "                x = 1;",
@@ -593,16 +593,16 @@ class TestControlFlow:
         assert body(src) == [src]
 
     def test_the_gap_comes_from_the_style(self):
-        out = body("        if (a) { x = 1; } else { x = 2; }",
+        out = body("        if (a) {\n x = 1; } else { x = 2; }",
                    Style(spacing_overrides={Site.BLOCK_TAIL: Spacing(0, 0)}))
         assert out[2] == "        }else{"
 
     @pytest.mark.parametrize("src,expected", [
-        ("foreach(i:list){x=1;}", "foreach (i : list) {"),
-        ("foreach ( i : list [ j ] ){x=1;}", "foreach (i : list[j]) {"),
-        ("repeat(i:4){x=1;}", "repeat (i : 4) {"),
-        ("repeat(4){x=1;}", "repeat (4) {"),
-        ("while(a<b){x=1;}", "while (a < b) {"),
+        ("foreach(i:list){\nx=1;}", "foreach (i : list) {"),
+        ("foreach ( i : list [ j ] ){\nx=1;}", "foreach (i : list[j]) {"),
+        ("repeat(i:4){\nx=1;}", "repeat (i : 4) {"),
+        ("repeat(4){\nx=1;}", "repeat (4) {"),
+        ("while(a<b){\nx=1;}", "while (a < b) {"),
     ], ids=["foreach", "foreach-index", "repeat-iterator", "repeat-count",
             "while"])
     def test_the_loops(self, src: str, expected: str):
@@ -623,7 +623,7 @@ class TestControlFlow:
         ``while``; they differ in *where the block sits*. Looking for the
         token declined ``while (x) { … }`` too, which is how this test
         exists."""
-        assert body("        while (n < 4) { n += 1; }")[0] == \
+        assert body("        while (n < 4) {\n n += 1; }")[0] == \
             "        while (n < 4) {"
 
     def test_a_break_inside_a_loop_is_reached(self):
@@ -631,7 +631,7 @@ class TestControlFlow:
         and no reachable instance in the corpus, because both of the corpus's
         sit inside an ``if`` that declined -- so a rule can only run on a node
         whose ancestors all have rules."""
-        assert body("        while (a) { break ; }") == [
+        assert body("        while (a) {\n break ; }") == [
             "        while (a) {",
             "            break;",
             "        }",

@@ -87,7 +87,7 @@ made.
 
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any, List, Optional, Tuple
 
 from ..layout import Layout, Verbatim, concat, text
 from ..style import Construct, Site
@@ -343,6 +343,53 @@ def _clean_before(ctx: Any, pos: int) -> bool:
 
 
 def _control(ctx: Any, node: Any) -> Layout:
+    """A constraint ``if`` chain or ``foreach``, opened out or kept on one
+    line per branch. See ``procedural._if_else``; the open shape is
+    :func:`_control_open`.
+    """
+    from .decls import one_line
+
+    opened = _control_open(ctx, node)
+    branches = _control_chain(ctx, node)
+    return opened if branches is None else one_line(ctx, branches, opened)
+
+
+def _control_chain(ctx: Any, node: Any) -> Optional[List[Any]]:
+    """Every branch of a constraint ``if`` chain or ``foreach``, or ``None``."""
+    from .decls import Branch
+
+    branches: List[Any] = []
+    else_pos = None
+    code = ctx.trivia.code_indices
+    while True:
+        body = _constraint_block_of(node)
+        sites = sites_for(ctx, node, extra_rules=_CONTROL_SITES)
+        if body is None or sites is None:
+            return None
+        branches.append(Branch(node, body, Construct.CONSTRAINT_IF_BODY,
+                               _CONTROL_VOCABULARY, sites, else_pos))
+        otherwise_set = _else_set(node)
+        if otherwise_set is None:
+            return branches
+        else_pos = next((code.index(c.token_index) for c in node.children
+                         if not c.is_rule and getattr(c.token, "type_name",
+                                                      None) == "TOK_ELSE"),
+                        None)
+        if else_pos is None:
+            return None
+        name = getattr(otherwise_set, "rule_name", None)
+        if name == "if_constraint_item":
+            node = otherwise_set
+            continue
+        if name == "constraint_block":
+            branches.append(Branch(otherwise_set, otherwise_set,
+                                   Construct.CONSTRAINT_IF_BODY,
+                                   else_pos=else_pos))
+            return branches
+        return None
+
+
+def _control_open(ctx: Any, node: Any) -> Layout:
     """``if (…) { … } else { … }`` and ``foreach (…) { … }`` (``S-1``, ``S-5``).
 
     One instance each in the corpus, and both were declined for a decision
@@ -365,7 +412,7 @@ def _control(ctx: Any, node: Any) -> Layout:
     if otherwise_set is not None:
         name = getattr(otherwise_set, "rule_name", None)
         if name == "if_constraint_item":
-            otherwise = _control(ctx, otherwise_set)
+            otherwise = _control_open(ctx, otherwise_set)
         elif name == "constraint_block":
             otherwise = _block(ctx, otherwise_set, Construct.CONSTRAINT_IF_BODY)
         else:

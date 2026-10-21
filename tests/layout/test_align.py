@@ -248,6 +248,67 @@ class TestRunsWithinAGroup:
         )
 
 
+class TestTheCommentColumn:
+    """The trailing-comment column is inferred on its own.
+
+    Two shapes the code columns cannot see: code that differs in front of
+    comments that agree, and comments on the ``{`` of each branch of a chain,
+    split into separate groups by the bodies between them.
+    """
+
+    def test_kept_where_the_code_columns_differ(self):
+        src = lines(f"int{M} a;{M}          // first",
+                    f"bit[8]{M} bb;{M}      // second",
+                    f"x{M} = 22;{M}         // third")
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert got == ["int a;          // first",
+                       "bit[8] bb;      // second",
+                       "x = 22;         // third"]
+
+    def test_kept_across_nested_lines(self):
+        src = lines(f"if (a) {{{M}        // case 1",
+                    f"    x{M} = 0;",
+                    f"}} else if (b) {{{M} // case 2",
+                    f"    x{M} = 3;",
+                    "}")
+        assert align_text(src, mode=AlignMode.INFER) == strip_marks(src)
+
+    def test_a_nested_chain_does_not_end_the_outer_one(self):
+        src = lines(f"a;{M}        // one",
+                    "f {",
+                    f"    b;{M}  // inner",
+                    f"    cc;{M} // inner",
+                    "}",
+                    f"dd;{M}       // two")
+        assert align_text(src, mode=AlignMode.INFER) == strip_marks(src)
+
+    def test_a_ragged_chain_is_flushed(self):
+        src = lines(f"if (a) {{{M}    // case 1",
+                    f"    x{M} = 0;",
+                    f"}} else if (b) {{{M}  // case 2",
+                    "}")
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert got[0] == "if (a) { // case 1"
+        assert got[2] == "} else if (b) { // case 2"
+
+    def test_a_blank_line_ends_the_chain(self):
+        src = lines(f"a{M}   // one", "", f"bb{M}  // two")
+        assert align_text(src, mode=AlignMode.INFER) == strip_marks(src)
+
+    def test_the_floor_does_not_move_an_authored_column(self):
+        src = lines(f"x;{M}  // one", f"yy;{M} // two")
+        got = align_text(src, mode=AlignMode.INFER, comment_spacing=4)
+        assert got == strip_marks(src)
+
+    def test_kept_where_the_code_in_front_is_flushed(self):
+        """``int a;`` and ``bit[8] bb;`` are a ragged code run and are
+        flushed; their comments were aligned and stay where they were."""
+        src = lines(f"int{M}  a;{M}      // one",
+                    f"bit[8]{M} bb;{M}   // two")
+        got = align_text(src, mode=AlignMode.INFER).split("\n")
+        assert got == ["int a;       // one", "bit[8] bb;   // two"]
+
+
 class TestTheLineThatEndsAGroup:
     """A marked line whose indent differs **opens the next group**, and until
     ``P3-8a`` it opened nothing.

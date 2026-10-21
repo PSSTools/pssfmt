@@ -52,9 +52,12 @@ Two rules, and between them they cover every comment a body can hold:
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, List, NamedTuple, Optional, Tuple
 
-from ..layout import AlignMode, Layout, column_stop, concat, indent, text
+from ..layout import (ALIGN_MARK, EMPTY, PAD_MARK, AlignMode, IfBreak, Layout,
+                      Verbatim, column_stop, concat, group, indent, text)
+from ..layout.ir import Text
 from ..style import Construct, SemicolonMode, Site
 from .emit import (
     code_span,
@@ -1514,6 +1517,202 @@ def _block(ctx: Any, node: Any, construct: Construct,
     if tail is not None:
         parts.append(tail)
     return concat(parts)
+
+
+class Branch(NamedTuple):
+    """One braced branch of a control statement, for :func:`one_line`.
+
+    *node* is what the header is read from -- the ``if`` or loop itself, or
+    for a bare ``else { … }`` the block, whose header is just its brace.
+    *body* holds the braces. *else_pos* is the code position of the ``else``
+    that introduces the branch, and ``None`` for the first.
+    """
+
+    node: Any
+    body: Any
+    construct: Construct
+    vocabulary: Any = None
+    sites: Any = None
+    else_pos: Optional[int] = None
+
+
+def _comment_inside(ctx: Any, first: int, last: int) -> bool:
+    """Whether a comment sits anywhere between code positions *first* and
+    *last*, excluding what leads the first token and trails the last."""
+    code = ctx.trivia.code_indices
+    for pos in range(first, last + 1):
+        entry = ctx.trivia.of(code[pos])
+        if pos > first and any(t.is_comment for t in entry.raw_leading):
+            return True
+        if pos < last and any(t.is_comment for t in entry.raw_trailing):
+            return True
+    return False
+
+
+def _line_of(ctx: Any, pos: int) -> int:
+    return ctx.trivia.of(ctx.trivia.code_indices[pos]).token.line
+
+
+def _col_of(ctx: Any, pos: int) -> int:
+    return ctx.trivia.of(ctx.trivia.code_indices[pos]).token.col
+
+
+def _inline_header(ctx: Any, branch: Branch, open_child: Any,
+                   pad: int) -> Optional[Layout]:
+    """``if (x)`` and the brace, with *pad* extra columns before the brace.
+
+    Not :func:`_header`, because the pad has to go *before* the ``{`` and that
+    function emits the brace as part of its span. Narrower, too: a header
+    :func:`~pssfmt.rules.tokens.emit_span` declines declines the one-line
+    shape rather than being reproduced inside it.
+    """
+    trivia = ctx.trivia
+    brace_pos = trivia.code_indices.index(open_child.token_index)
+    span = code_span(trivia, branch.node)
+    if span is None:
+        return None
+    if span[0] >= brace_pos:
+        return text(" " * pad + "{")
+    emitted = emit_span(ctx, span[0], brace_pos - 1, branch.vocabulary,
+                        sites_at=branch.sites)
+    if emitted is None:
+        return None
+    last = trivia.of(trivia.code_indices[brace_pos - 1]).token
+    brace = trivia.of(open_child.token_index).token
+    gap = floor_gap(ctx.style.gap(None, Site.BRACE_OPEN), last, brace)
+    return concat([emitted, text(" " * (gap + pad) + "{")])
+
+
+def _flush(layout: Layout) -> Layout:
+    """*layout* with every column stop resolved flush-left.
+
+    A statement in a one-line branch shares its line with a header and a
+    brace, so it is a cell in no table -- but its rule does not know that,
+    and marks a stop (an assignment's ``=``) carrying the author's padding.
+    Left in, the alignment pass reads the padding as a column and keeps it.
+    """
+    if isinstance(layout, Text):
+        if ALIGN_MARK in layout.value or PAD_MARK in layout.value:
+            return text(layout.value.replace(ALIGN_MARK, "")
+                        .replace(PAD_MARK, ""))
+        return layout
+    fields = {}
+    for name in ("parts", "contents", "break_contents", "flat_contents"):
+        value = getattr(layout, name, None)
+        if isinstance(value, tuple):
+            fields[name] = tuple(_flush(part) for part in value)
+        elif value is not None:
+            fields[name] = _flush(value)
+    return dataclasses.replace(layout, **fields) if fields else layout
+
+
+def one_line(ctx: Any, branches: List[Branch], opened: Layout) -> Layout:
+    """*opened*, or the same statement kept on one line per branch.
+
+    ``if (x) { y = 0; }`` stays as written when the author wrote it that way:
+    each branch -- its header, ``{``, one statement and ``}`` -- on a single
+    source line, with no comment anywhere inside. Never the other direction:
+    a branch the author broke is not joined, so nothing here depends on width
+    except the decision to open out (``docs/style.rst``, "A branch written
+    on one line").
+
+    **All or nothing.** An ``if``/``else if``/``else`` chain stays inline only
+    if every branch qualifies, and opens out whole if any line of it is past
+    ``print_width``. The engine measures a group up to its first line break,
+    so the first line carries trailing padding to the width of the widest
+    one; the padding is trimmed with the rest of the line's trailing
+    whitespace when the break is written.
+
+    ``else`` goes where the author put it: on the line after the previous
+    ``}``, or after it on the same line. A chain written one branch per line
+    whose braces the author lined up keeps them lined up.
+    """
+    if isinstance(opened, Verbatim):
+        return opened
+    rows = []  # (starts a new line, open_child, close_pos, member, comment)
+    prev_close = None
+    for branch in branches:
+        braces = _braces(branch.body)
+        if braces is None:
+            return opened
+        open_at, close_at = braces
+        span = code_span(ctx.trivia, branch.node)
+        if span is None:
+            return opened
+        start = span[0] if branch.else_pos is None else branch.else_pos
+        code = ctx.trivia.code_indices
+        close_pos = code.index(branch.body.children[close_at].token_index)
+        if _line_of(ctx, start) != _line_of(ctx, close_pos) \
+                or _comment_inside(ctx, start, close_pos):
+            return opened
+        new_line = prev_close is not None \
+            and _line_of(ctx, start) != _line_of(ctx, prev_close)
+        if prev_close is not None:
+            # Between the previous ``}`` and this ``else``: a same-line
+            # comment on the ``}`` is that row's trailing comment, so a chain
+            # written one branch per line keeps its comment column. Anything
+            # else -- ``} /* why */ else``, a comment on a line of its own --
+            # declines.
+            if any(t.is_comment for t in ctx.trivia.of(
+                    ctx.trivia.code_indices[start]).raw_leading):
+                return opened
+            tail = _trailing(ctx, ctx.trivia.code_indices[prev_close])
+            if tail is _BAIL or (tail is not None and not new_line):
+                return opened
+            if tail is not None:
+                rows[-1] = rows[-1][:4] + (tail,)
+        members = _members_of(ctx, branch.body, open_at, close_at, None,
+                              branch.construct)
+        if members is None or len(members) != 1:
+            return opened
+        rows.append((new_line, branch.body.children[open_at], close_pos,
+                     _flush(members[0].layout), None))
+        prev_close = close_pos
+
+    keyword = "else" + " " * ctx.style.gap(None, Site.BLOCK_TAIL)
+    cuddle = " " * ctx.style.gap(Site.BLOCK_TAIL, None)
+    lead = [text(keyword) if i else EMPTY for i in range(len(rows))]
+
+    # The brace column. Kept only where the author kept it: one branch per
+    # line, every brace in the same source column.
+    pads = [0] * len(rows)
+    columns = [_col_of(ctx, code.index(row[1].token_index)) for row in rows]
+    if len(rows) > 1 and all(row[0] for row in rows[1:]) \
+            and len(set(columns)) == 1:
+        headers = [_inline_header(ctx, b, row[1], 0)
+                   for b, row in zip(branches, rows)]
+        if any(h is None for h in headers):
+            return opened
+        widths = [flat_width(lead[i]) + flat_width(h)
+                  for i, h in enumerate(headers)]
+        pads = [max(widths) - w for w in widths]
+
+    after_open = " " * ctx.style.gap(Site.BRACE_OPEN, None)
+    before_close = " " * ctx.style.gap(None, Site.BRACE_CLOSE)
+    lines: List[List[Layout]] = []
+    for i, (branch, row) in enumerate(zip(branches, rows)):
+        new_line, open_child, _, member, tail = row
+        header = _inline_header(ctx, branch, open_child, pads[i])
+        if header is None:
+            return opened
+        if i == 0 or new_line:
+            lines.append([])
+        elif i:
+            lines[-1].append(text(cuddle))
+        lines[-1].extend([lead[i], header, text(after_open), member,
+                          text(before_close + "}")])
+        if tail is not None:
+            lines[-1].append(tail)
+
+    widths = [sum(flat_width(part) for part in line) for line in lines]
+    first = list(lines[0])
+    if max(widths) > widths[0]:
+        first.append(text(" " * (max(widths) - widths[0])))
+    parts: List[Layout] = first
+    for line in lines[1:]:
+        parts.append(hardline())
+        parts.extend(line)
+    return group(IfBreak(opened, concat(parts)))
 
 
 #: ``enum spi_mode_e : bit[2] { SPI_MODE_0 = 0, … }`` (``P3-12``).

@@ -121,11 +121,11 @@ six ``do`` statements inside it.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from ..layout import Layout, Verbatim, concat, text
 from ..style import Construct, Site
-from .decls import _block, _reproduce
+from .decls import Branch, _block, _reproduce, one_line
 from .emit import code_span
 from .exprs import (EXPRESSION_COLON, EXPRESSION_LIST_BRACE,
                     EXPRESSION_VOCABULARY, sites_for)
@@ -353,8 +353,10 @@ def _repeat(ctx: Any, node: Any) -> Layout:
     sites = sites_for(ctx, node, extra_rules=_REPEAT_SITES)
     if sites is None:
         return _reproduce(ctx, node)
-    return _block(ctx, node, Construct.ACTIVITY_REPEAT, body=body,
-                  vocabulary=_BLOCK_HEADER_VOCABULARY, sites=sites)
+    opened = _block(ctx, node, Construct.ACTIVITY_REPEAT, body=body,
+                    vocabulary=_BLOCK_HEADER_VOCABULARY, sites=sites)
+    return one_line(ctx, [Branch(node, body, Construct.ACTIVITY_REPEAT,
+                                 _BLOCK_HEADER_VOCABULARY, sites)], opened)
 
 
 #: ``a: do step;`` -- a label, its colon, and nothing else (``S-6``).
@@ -493,6 +495,47 @@ def _clean_before(ctx: Any, pos: int) -> bool:
 
 
 def _if_else(ctx: Any, node: Any) -> Layout:
+    """An activity ``if`` chain, opened out or kept one line per branch.
+
+    See ``procedural._if_else``; the open shape is :func:`_if_open`.
+    """
+    opened = _if_open(ctx, node)
+    branches = _if_chain(ctx, node)
+    return opened if branches is None else one_line(ctx, branches, opened)
+
+
+def _if_chain(ctx: Any, node: Any) -> Optional[List[Branch]]:
+    """Every branch of an activity ``if`` chain, or ``None``."""
+    branches: List[Branch] = []
+    else_pos = None
+    code = ctx.trivia.code_indices
+    while True:
+        then_block, else_stmt = _if_branches(node)
+        sites = sites_for(ctx, node, extra_rules=_IF_SITES)
+        if then_block is None or sites is None:
+            return None
+        branches.append(Branch(node, then_block, Construct.IF_BODY,
+                               _BLOCK_HEADER_VOCABULARY, sites, else_pos))
+        if else_stmt is None:
+            return branches
+        else_pos = next((code.index(c.token_index) for c in node.children
+                         if not c.is_rule and getattr(c.token, "type_name",
+                                                      None) == "TOK_ELSE"),
+                        None)
+        if else_pos is None:
+            return None
+        name = getattr(else_stmt, "rule_name", None)
+        if name == "activity_if_else_stmt":
+            node = else_stmt
+            continue
+        if name == "activity_sequence_block_stmt":
+            branches.append(Branch(else_stmt, else_stmt, Construct.ELSE_BODY,
+                                   else_pos=else_pos))
+            return branches
+        return None
+
+
+def _if_open(ctx: Any, node: Any) -> Layout:
     """``if (use_dma) { … } else { … }`` in an activity (``S-1``).
 
     One corpus instance, and it is the same decision as the procedural one
@@ -519,7 +562,7 @@ def _if_else(ctx: Any, node: Any) -> Layout:
     if else_stmt is not None:
         name = getattr(else_stmt, "rule_name", None)
         if name == "activity_if_else_stmt":
-            otherwise = _if_else(ctx, else_stmt)
+            otherwise = _if_open(ctx, else_stmt)
         elif name == "activity_sequence_block_stmt":
             otherwise = _block(ctx, else_stmt, Construct.ELSE_BODY)
         else:

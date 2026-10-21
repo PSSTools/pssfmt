@@ -6,6 +6,32 @@ change** and advances the major component, because a formatter that quietly
 reformats a pinned codebase on upgrade is a formatter organizations pin and
 never upgrade again.
 
+## 0.5.0 — 2026-10-21
+
+### Changed — a one-line control branch stays on one line
+
+`if (x) { y = 0; }`, `else if (…) { … }` chains, and `foreach`/`repeat`/`while`
+loops written on one line -- header, `{`, one statement, `}`, no comment --
+are no longer opened out. Procedural, activity and constraint forms alike. A
+chain is kept whole or opened whole; it opens if any line would pass
+`print_width` or any branch was written open. `else` stays where the author
+put it, and a brace column the author aligned stays aligned. Nothing that was
+written open is ever joined. See `docs/style.rst`, "A branch written on one
+line". Corpus radius: one file.
+
+A one-line chain may carry a trailing comment after each branch's `}`; a
+comment anywhere else inside the chain still opens it out.
+
+### Changed — `infer` sees a trailing-comment column on its own
+
+A column of trailing comments the author lined up is kept even where the code
+in front of it is not a table (`int a;` over `bit[8] bb;`), and across the
+nested lines between them (a comment on the `{` of each branch of an
+`if`/`else if` chain). Commented lines at one indentation form one column,
+carried over deeper-nested lines and ended by a blank line or a shallower one.
+A ragged column of this kind is flushed, where before it could be kept as
+written by accident.
+
 ## 0.4.2 — 2026-10-19
 
 ### Fixed — hand-aligned blocks declined as non-idempotent
